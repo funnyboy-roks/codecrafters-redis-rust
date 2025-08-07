@@ -1,20 +1,21 @@
 use std::net::SocketAddr;
 
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
 async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
     println!("accepted new connection");
 
-    let (rx, mut tx) = stream.split();
-    let buf = BufReader::new(rx);
-    let mut lines = buf.lines();
+    let (mut rx, mut tx) = stream.split();
+    // let buf = BufReader::new(rx);
+    // let mut lines = buf.lines();
+    let mut s = String::new();
+    rx.read_to_string(&mut s).await?;
+    dbg!(s);
 
-    while let Some(_) = lines.next_line().await? {
-        tx.write_all(b"+PONG\r\n").await?;
-    }
+    tx.write_all(b"+PONG\r\n").await?;
     Ok(())
 }
 
