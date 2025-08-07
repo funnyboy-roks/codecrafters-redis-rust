@@ -1,9 +1,20 @@
 use std::net::SocketAddr;
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{TcpListener, TcpStream},
+};
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
+async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
     println!("accepted new connection");
+
+    let (rx, mut tx) = stream.split();
+    let buf = BufReader::new(rx);
+    let mut lines = buf.lines();
+
+    while let Some(_) = lines.next_line().await? {
+        tx.write_all(b"+PONG\r\n").await?;
+    }
     Ok(())
 }
 
@@ -15,6 +26,4 @@ async fn main() -> anyhow::Result<()> {
         let (stream, addr) = listener.accept().await?;
         tokio::spawn(handle_connection(stream, addr));
     }
-
-    Ok(())
 }
