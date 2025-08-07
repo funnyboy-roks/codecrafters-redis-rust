@@ -151,11 +151,12 @@ async fn handle_connection(mut stream: TcpStream, _addr: SocketAddr) -> anyhow::
     let (rx, mut tx) = stream.split();
     let mut buf = BufReader::new(rx);
 
-    let value = parse_resp(&mut buf).await.context("parsing value")?;
+    loop {
+        let value = parse_resp(&mut buf).await.context("parsing value")?;
+        dbg!(value);
+        tx.write_all(b"+PONG\r\n").await?;
+    }
 
-    dbg!(value);
-
-    tx.write_all(b"+PONG\r\n").await?;
     Ok(())
 }
 
