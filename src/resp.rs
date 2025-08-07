@@ -10,7 +10,6 @@ pub enum DataKind {
     Integer = b':',
     BulkString = b'$',
     Array = b'*',
-    Null = b'_',
     Boolean = b'#',
     Double = b',',
     BugNumber = b'(',
@@ -38,7 +37,6 @@ impl TryFrom<u8> for DataKind {
             // b':' => Ok(Self::Integer),
             b'$' => Ok(Self::BulkString),
             b'*' => Ok(Self::Array),
-            // b'_' => Ok(Self::Null),
             // b'#' => Ok(Self::Boolean),
             // b',' => Ok(Self::Double),
             // b'(' => Ok(Self::BugNumber),
@@ -131,7 +129,6 @@ where
 
             serde_json::Value::Array(array)
         }
-        DataKind::Null => todo!(),
         DataKind::Boolean => todo!(),
         DataKind::Double => todo!(),
         DataKind::BugNumber => todo!(),
@@ -151,7 +148,10 @@ where
     W: AsyncWrite + Unpin,
 {
     match value {
-        Value::Null => todo!(),
+        Value::Null => w
+            .write_all(b"$-1\r\n")
+            .await
+            .context("writing null json value")?,
         Value::Bool(_) => todo!(),
         Value::Number(_) => todo!(),
         Value::String(s) => {
