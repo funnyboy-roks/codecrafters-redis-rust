@@ -56,7 +56,7 @@ async fn handle_connection(
         );
 
         // TODO: handle error
-        assert!(command.len() >= 1);
+        assert!(!command.is_empty());
 
         let (command, args) = command.split_first().expect("command length >= 1");
 
@@ -251,15 +251,32 @@ async fn handle_connection(
                     0
                 };
 
-                resp::write(
-                    &mut tx,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_u128(len as _)
-                            .expect("len is probably <= u64::MAX"),
-                    ),
-                )
-                .await
-                .context("responding to llen command")?;
+                resp::write(&mut tx, serde_json::Value::from(len))
+                    .await
+                    .context("responding to llen command")?;
+            }
+            "lpop" => {
+                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
+                assert_eq!(values.len(), 0);
+
+                let ret = if let Some(mut list) = state.map.get_mut(key) {
+                    match list.value {
+                        MapValueContent::String(_) => todo!(),
+                        MapValueContent::List(ref mut items) => {
+                            if let Some(v) = items.pop_front() {
+                                serde_json::Value::from(v)
+                            } else {
+                                serde_json::Value::Null
+                            }
+                        }
+                    }
+                } else {
+                    serde_json::Value::Null
+                };
+
+                resp::write(&mut tx, ret)
+                    .await
+                    .context("responding to lpop command")?;
             }
             _ => {
                 bail!("unknown command: {command:?}");
