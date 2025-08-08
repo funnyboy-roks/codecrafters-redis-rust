@@ -189,7 +189,7 @@ async fn handle_connection(
                     ),
                 )
                 .await
-                .context("responding to rpush command")?;
+                .context("responding to lpush command")?;
             }
             "lrange" => {
                 let [key, start_index, end_index, ..] = args else {
@@ -237,6 +237,29 @@ async fn handle_connection(
                 resp::write(&mut tx, ret)
                     .await
                     .context("responding to lrange command")?;
+            }
+            "llen" => {
+                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
+                assert_eq!(values.len(), 0);
+
+                let len = if let Some(list) = state.map.get(key) {
+                    match list.value {
+                        MapValueContent::String(_) => todo!(),
+                        MapValueContent::List(ref items) => items.len(),
+                    }
+                } else {
+                    0
+                };
+
+                resp::write(
+                    &mut tx,
+                    serde_json::Value::Number(
+                        serde_json::Number::from_u128(len as _)
+                            .expect("len is probably <= u64::MAX"),
+                    ),
+                )
+                .await
+                .context("responding to llen command")?;
             }
             _ => {
                 bail!("unknown command: {command:?}");
