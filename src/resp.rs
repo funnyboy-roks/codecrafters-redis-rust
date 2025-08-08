@@ -153,7 +153,11 @@ where
             .await
             .context("writing null json value")?,
         Value::Bool(_) => todo!(),
-        Value::Number(_) => todo!(),
+        Value::Number(n) => {
+            w.write_u8(DataKind::Integer.into()).await?;
+            w.write_all(format!("{}\r\n", n.as_u64().expect("numbers should be u64")).as_bytes())
+                .await?;
+        }
         Value::String(s) => {
             w.write_u8(DataKind::BulkString.into()).await?;
             w.write_all(format!("{}\r\n", s.len()).as_bytes()).await?;

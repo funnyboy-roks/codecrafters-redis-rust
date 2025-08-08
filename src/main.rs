@@ -11,8 +11,14 @@ use tokio::{
 pub mod resp;
 
 #[derive(Debug, Clone)]
+enum MapValueContent {
+    String(String),
+    List(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
 struct MapValue {
-    value: String,
+    value: MapValueContent,
     expires_at: Option<Instant>,
 }
 
@@ -39,7 +45,7 @@ async fn handle_connection(
         }
 
         let value = resp::parse(&mut buf).await.context("parsing value")?;
-        let command: Vec<String> = serde_json::from_value(value).context("parssing command")?;
+        let command: Vec<String> = serde_json::from_value(value).context("parsing command")?;
 
         eprintln!(
             "[{}:{}:{}] command = {:?}",
@@ -48,27 +54,32 @@ async fn handle_connection(
             column!(),
             &command
         );
-        match &*command[0].to_lowercase() {
+
+        // TODO: handle error
+        assert!(command.len() >= 1);
+
+        let (command, args) = command.split_first().expect("command length >= 1");
+
+        match &*command.to_lowercase() {
             "ping" => {
                 tx.write_all(b"+PONG\r\n").await?;
             }
             "echo" => {
-                let response = command[1].clone();
+                let response = args[0].clone();
 
                 resp::write(&mut tx, serde_json::Value::String(response))
                     .await
                     .context("responding to echo command")?;
             }
             "set" => {
-                let key = command[1].clone();
-                let value = command[2].clone();
+                let [key, value, ..] = args else {
+                    todo!("args.len() < 2");
+                };
 
                 let value = MapValue {
-                    value,
-                    expires_at: if command.len() > 4 && command[3].eq_ignore_ascii_case("px") {
-                        let ms: u64 = command[4]
-                            .parse()
-                            .context("parsing millis until expiration")?;
+                    value: MapValueContent::String(value.clone()),
+                    expires_at: if args.len() > 2 && args[2].eq_ignore_ascii_case("px") {
+                        let ms: u64 = args[3].parse().context("parsing millis until expiration")?;
 
                         Some(Instant::now() + Duration::from_millis(ms))
                     } else {
@@ -76,18 +87,23 @@ async fn handle_connection(
                     },
                 };
 
-                state.map.insert(key, value);
+                state.map.insert(key.clone(), value);
 
                 resp::write(&mut tx, serde_json::json!("OK"))
                     .await
                     .context("responding to set command")?;
             }
             "get" => {
-                let key = &command[1];
+                let key = &args[0];
                 let value = if let Some(value) = state.map.get(key) {
                     if value.expires_at.is_none_or(|e| Instant::now() < e) {
-                        eprintln!("get {key} from map -> {}", value.value);
-                        serde_json::Value::String(value.value.clone())
+                        eprintln!("get {key} from map -> {:?}", value.value);
+                        match &value.value {
+                            MapValueContent::String(string) => {
+                                serde_json::Value::String(string.clone())
+                            }
+                            MapValueContent::List(_) => serde_json::Value::Null,
+                        }
                     } else {
                         drop(value);
                         state.map.remove(key);
@@ -102,6 +118,40 @@ async fn handle_connection(
                 resp::write(&mut tx, value)
                     .await
                     .context("responding to get command")?;
+            }
+            "rpush" => {
+                let [key, value, ..] = args else {
+                    todo!("args.len() < 2");
+                };
+
+                let len = if let Some(mut list) = state.map.get_mut(key) {
+                    match list.value {
+                        MapValueContent::String(_) => todo!(),
+                        MapValueContent::List(ref mut items) => {
+                            items.push(value.clone());
+                            items.len()
+                        }
+                    }
+                } else {
+                    state.map.insert(
+                        key.clone(),
+                        MapValue {
+                            value: MapValueContent::List(vec![value.clone()]),
+                            expires_at: None,
+                        },
+                    );
+                    1
+                };
+
+                resp::write(
+                    &mut tx,
+                    serde_json::Value::Number(
+                        serde_json::Number::from_u128(len as _)
+                            .expect("len is probably <= u64::MAX"),
+                    ),
+                )
+                .await
+                .context("responding to rpush command")?;
             }
             _ => {
                 bail!("unknown command: {command:?}");
