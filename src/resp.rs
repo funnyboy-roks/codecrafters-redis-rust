@@ -172,7 +172,6 @@ where
                     .await
                     .with_context(|| format!("writing value at index {i} in array"))?;
             }
-            w.write_all(b"\r\n").await?;
         }
         Value::Object(_) => todo!(),
     }

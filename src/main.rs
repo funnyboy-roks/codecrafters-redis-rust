@@ -151,6 +151,49 @@ async fn handle_connection(
                 .await
                 .context("responding to rpush command")?;
             }
+            "lrange" => {
+                let [key, start_index, end_index, ..] = args else {
+                    todo!("args.len() < 3");
+                };
+
+                let start_index: isize = start_index.parse().context("Invalid start index")?;
+                let end_index: isize = end_index.parse().context("Invalid end index")?;
+
+                let ret = if let Some(list) = state.map.get(key) {
+                    match list.value {
+                        MapValueContent::String(_) => todo!(),
+                        MapValueContent::List(ref items)
+                            if start_index > end_index || start_index >= items.len() as isize =>
+                        {
+                            serde_json::json!([])
+                        }
+                        MapValueContent::List(ref items) => {
+                            let end_index = if end_index >= items.len() as isize {
+                                items.len() as isize - 1
+                            } else {
+                                end_index
+                            };
+
+                            let start_index = start_index as usize;
+                            let end_index = end_index as usize;
+
+                            serde_json::Value::Array(
+                                items[start_index..=end_index]
+                                    .iter()
+                                    .map(Clone::clone)
+                                    .map(serde_json::Value::String)
+                                    .collect(),
+                            )
+                        }
+                    }
+                } else {
+                    serde_json::json!([])
+                };
+
+                resp::write(&mut tx, ret)
+                    .await
+                    .context("responding to lrange command")?;
+            }
             _ => {
                 bail!("unknown command: {command:?}");
             }
