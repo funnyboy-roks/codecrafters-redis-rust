@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
 use anyhow::Context;
 
@@ -16,11 +16,19 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
                 items.extend(values.iter().map(String::clone));
                 let len = items.len();
 
-                if let Some((_, waiting)) = state.waiting_on_list.remove(key) {
-                    if let Err(e) =
-                        waiting.send(items.pop_front().expect("pushed at least one item"))
-                    {
-                        items.push_front(e);
+                if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
+                    loop {
+                        let Some(tx) = waiting.pop_front() else {
+                            break;
+                        };
+                        let Some(item) = items.pop_front() else {
+                            waiting.push_front(tx);
+                            break;
+                        };
+
+                        if let Err(e) = tx.send(item) {
+                            items.push_front(e);
+                        }
                     }
                 }
 
@@ -30,15 +38,23 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
     } else {
         let mut values = values;
 
-        let removed = if let Some((_, waiting)) = state.waiting_on_list.remove(key) {
-            let (first, new_values) = values.split_first().expect("length asserted above");
-            if waiting.send(first.clone()).is_ok() {
-                values = new_values;
+        let og_len = values.len();
+
+        if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
+            loop {
+                let Some(tx) = waiting.pop_front() else {
+                    break;
+                };
+                let Some((item, new_values)) = values.split_first() else {
+                    waiting.push_front(tx);
+                    break;
+                };
+
+                if tx.send(item.clone()).is_ok() {
+                    values = new_values;
+                }
             }
-            1
-        } else {
-            0
-        };
+        }
 
         state.map.insert(
             key.clone(),
@@ -47,7 +63,7 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
                 expires_at: None,
             },
         );
-        values.len() + removed
+        og_len
     };
 
     Ok(Some(serde_json::Value::from(len)))
@@ -58,26 +74,53 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
 
     assert!(!values.is_empty());
 
-    let removed = if let Some((_, waiting)) = state.waiting_on_list.remove(key) {
-        let (last, new_values) = values.split_last().expect("length asserted above");
-        if waiting.send(last.clone()).is_ok() {
-            values = new_values;
+    let og_len = values.len();
+
+    if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
+        loop {
+            let Some(tx) = waiting.pop_front() else {
+                break;
+            };
+            let Some((item, new_values)) = values.split_last() else {
+                waiting.push_front(tx);
+                break;
+            };
+
+            if tx.send(item.clone()).is_ok() {
+                values = new_values;
+            }
         }
-        1
-    } else {
-        0
-    };
+    }
 
     let len = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(ref mut items) => {
+                let len = items.len() + og_len;
+
                 items.reserve(values.len());
                 values
                     .iter()
                     .map(String::clone)
                     .for_each(|v| items.push_front(v));
-                items.len() + removed
+
+                if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
+                    loop {
+                        let Some(tx) = waiting.pop_front() else {
+                            break;
+                        };
+                        let Some(item) = items.pop_front() else {
+                            waiting.push_front(tx);
+                            break;
+                        };
+
+                        if let Err(e) = tx.send(item) {
+                            items.push_front(e);
+                        }
+                    }
+                }
+
+                len
             }
         }
     } else {
@@ -88,7 +131,7 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
                 expires_at: None,
             },
         );
-        values.len() + removed
+        og_len
     };
 
     Ok(Some(serde_json::Value::from(len)))
@@ -192,8 +235,34 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
     let timeout = values
         .first()
         .map(|v| v.parse::<u64>().expect("invalid lpop count"))
-        .map(|n| (n > 0).then_some(n).map(Duration::from_secs))
-        .flatten();
+        .and_then(|n| (n > 0).then_some(n))
+        .map(Duration::from_secs);
+
+    let wait = || async {
+        let ret: anyhow::Result<serde_json::Value> = {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
+                waiting.push_back(tx);
+            } else {
+                let mut vd = VecDeque::with_capacity(1);
+                vd.push_back(tx);
+                state.waiting_on_list.insert(key.into(), vd);
+            }
+
+            let val = if let Some(timeout) = timeout {
+                match tokio::time::timeout(timeout, rx).await {
+                    Ok(val) => val,
+                    Err(_) => return Ok(serde_json::Value::Null),
+                }
+            } else {
+                rx.await
+            }
+            .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
+
+            Ok(serde_json::json!([key, val]))
+        };
+        ret
+    };
 
     let ret = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
@@ -203,38 +272,12 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
                     serde_json::json!([key, v])
                 } else {
                     drop(list);
-                    if state.waiting_on_list.contains_key(key) {
-                        serde_json::Value::Null
-                    } else {
-                        let (tx, rx) = tokio::sync::oneshot::channel();
-                        state.waiting_on_list.insert(key.clone(), tx);
-
-                        let val = rx
-                            .await
-                            .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
-
-                        serde_json::Value::from(val)
-                    }
+                    wait().await?
                 }
             }
         }
-    } else if state.waiting_on_list.contains_key(key) {
-        serde_json::Value::Null
     } else {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        state.waiting_on_list.insert(key.clone(), tx);
-
-        let val = if let Some(timeout) = timeout {
-            match tokio::time::timeout(timeout, rx).await {
-                Ok(val) => val,
-                Err(_) => return Ok(Some(serde_json::Value::Null)),
-            }
-        } else {
-            rx.await
-        }
-        .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
-
-        serde_json::Value::from(val)
+        wait().await?
     };
 
     Ok(Some(ret))

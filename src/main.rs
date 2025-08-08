@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{TcpListener, TcpStream},
+    sync::oneshot,
     time::Instant,
 };
 
@@ -26,7 +27,7 @@ struct MapValue {
 #[derive(Debug, Default)]
 pub struct State {
     map: DashMap<String, MapValue>,
-    waiting_on_list: DashMap<String, tokio::sync::oneshot::Sender<String>>,
+    waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
 }
 
 async fn handle_connection(
