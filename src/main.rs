@@ -120,15 +120,13 @@ async fn handle_connection(
                     .context("responding to get command")?;
             }
             "rpush" => {
-                let [key, value, ..] = args else {
-                    todo!("args.len() < 2");
-                };
+                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
                 let len = if let Some(mut list) = state.map.get_mut(key) {
                     match list.value {
                         MapValueContent::String(_) => todo!(),
                         MapValueContent::List(ref mut items) => {
-                            items.push(value.clone());
+                            items.extend_from_slice(values);
                             items.len()
                         }
                     }
@@ -136,7 +134,7 @@ async fn handle_connection(
                     state.map.insert(
                         key.clone(),
                         MapValue {
-                            value: MapValueContent::List(vec![value.clone()]),
+                            value: MapValueContent::List(values.to_vec()),
                             expires_at: None,
                         },
                     );
