@@ -201,24 +201,25 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
             MapValueContent::List(ref mut items) => {
                 if let Some(v) = items.pop_front() {
                     serde_json::json!([key, v])
-                } else if state.waiting_on_list.contains_key(key) {
-                    drop(list);
-                    eprintln!("not blocking, returning null");
-                    serde_json::Value::Null
                 } else {
-                    drop(list); // TODO: Make this cleaner, as we only need it in the first branch
-                                // of this if-else
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    state.waiting_on_list.insert(key.clone(), tx);
+                    drop(list);
+                    if state.waiting_on_list.contains_key(key) {
+                        serde_json::Value::Null
+                    } else {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        state.waiting_on_list.insert(key.clone(), tx);
 
-                    let val = rx
-                        .await
-                        .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
+                        let val = rx
+                            .await
+                            .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
 
-                    serde_json::Value::from(val)
+                        serde_json::Value::from(val)
+                    }
                 }
             }
         }
+    } else if state.waiting_on_list.contains_key(key) {
+        serde_json::Value::Null
     } else {
         let (tx, rx) = tokio::sync::oneshot::channel();
         state.waiting_on_list.insert(key.clone(), tx);
