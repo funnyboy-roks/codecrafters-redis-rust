@@ -138,7 +138,7 @@ async fn handle_connection(
                             expires_at: None,
                         },
                     );
-                    1
+                    values.len()
                 };
 
                 resp::write(
