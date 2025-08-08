@@ -3,11 +3,12 @@ use std::{collections::VecDeque, net::SocketAddr, sync::Arc, time::Duration};
 use anyhow::{bail, Context};
 use dashmap::DashMap;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     net::{TcpListener, TcpStream},
     time::Instant,
 };
 
+pub mod command;
 pub mod resp;
 
 #[derive(Debug, Clone)]
@@ -22,9 +23,10 @@ struct MapValue {
     expires_at: Option<Instant>,
 }
 
-#[derive(Debug, Clone)]
-struct State {
+#[derive(Debug, Default)]
+pub struct State {
     map: DashMap<String, MapValue>,
+    waiting_on_list: DashMap<String, tokio::sync::oneshot::Sender<String>>,
 }
 
 async fn handle_connection(
@@ -60,235 +62,29 @@ async fn handle_connection(
 
         let (command, args) = command.split_first().expect("command length >= 1");
 
-        match &*command.to_lowercase() {
-            "ping" => {
-                tx.write_all(b"+PONG\r\n").await?;
-            }
+        let ret = match &*command.to_lowercase() {
+            "ping" => Some(serde_json::json!("PING")),
             "echo" => {
                 let response = args[0].clone();
-
-                resp::write(&mut tx, serde_json::Value::String(response))
-                    .await
-                    .context("responding to echo command")?;
+                Some(serde_json::Value::from(response))
             }
-            "set" => {
-                let [key, value, ..] = args else {
-                    todo!("args.len() < 2");
-                };
-
-                let value = MapValue {
-                    value: MapValueContent::String(value.clone()),
-                    expires_at: if args.len() > 2 && args[2].eq_ignore_ascii_case("px") {
-                        let ms: u64 = args[3].parse().context("parsing millis until expiration")?;
-
-                        Some(Instant::now() + Duration::from_millis(ms))
-                    } else {
-                        None
-                    },
-                };
-
-                state.map.insert(key.clone(), value);
-
-                resp::write(&mut tx, serde_json::json!("OK"))
-                    .await
-                    .context("responding to set command")?;
-            }
-            "get" => {
-                let key = &args[0];
-                let value = if let Some(value) = state.map.get(key) {
-                    if value.expires_at.is_none_or(|e| Instant::now() < e) {
-                        eprintln!("get {key} from map -> {:?}", value.value);
-                        match &value.value {
-                            MapValueContent::String(string) => {
-                                serde_json::Value::String(string.clone())
-                            }
-                            MapValueContent::List(_) => serde_json::Value::Null,
-                        }
-                    } else {
-                        drop(value);
-                        state.map.remove(key);
-                        eprintln!("remove {key} from map because expired");
-                        serde_json::Value::Null
-                    }
-                } else {
-                    eprintln!("get {key} from map -> (nil)");
-                    serde_json::Value::Null
-                };
-
-                resp::write(&mut tx, value)
-                    .await
-                    .context("responding to get command")?;
-            }
-            "rpush" => {
-                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
-
-                let len = if let Some(mut list) = state.map.get_mut(key) {
-                    match list.value {
-                        MapValueContent::String(_) => todo!(),
-                        MapValueContent::List(ref mut items) => {
-                            items.extend(values.iter().map(String::clone));
-                            items.len()
-                        }
-                    }
-                } else {
-                    state.map.insert(
-                        key.clone(),
-                        MapValue {
-                            value: MapValueContent::List(
-                                values.iter().map(String::clone).collect(),
-                            ),
-                            expires_at: None,
-                        },
-                    );
-                    values.len()
-                };
-
-                resp::write(
-                    &mut tx,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_u128(len as _)
-                            .expect("len is probably <= u64::MAX"),
-                    ),
-                )
-                .await
-                .context("responding to rpush command")?;
-            }
-            "lpush" => {
-                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
-
-                let len = if let Some(mut list) = state.map.get_mut(key) {
-                    match list.value {
-                        MapValueContent::String(_) => todo!(),
-                        MapValueContent::List(ref mut items) => {
-                            items.reserve(values.len());
-                            values
-                                .iter()
-                                .map(String::clone)
-                                .for_each(|v| items.push_front(v));
-                            items.len()
-                        }
-                    }
-                } else {
-                    state.map.insert(
-                        key.clone(),
-                        MapValue {
-                            value: MapValueContent::List(
-                                values.iter().rev().map(String::clone).collect(),
-                            ),
-                            expires_at: None,
-                        },
-                    );
-                    values.len()
-                };
-
-                resp::write(
-                    &mut tx,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_u128(len as _)
-                            .expect("len is probably <= u64::MAX"),
-                    ),
-                )
-                .await
-                .context("responding to lpush command")?;
-            }
-            "lrange" => {
-                let [key, start_index, end_index, ..] = args else {
-                    todo!("args.len() < 3");
-                };
-
-                let start_index: isize = start_index.parse().context("Invalid start index")?;
-                let end_index: isize = end_index.parse().context("Invalid end index")?;
-
-                let ret = if let Some(list) = state.map.get(key) {
-                    match list.value {
-                        MapValueContent::String(_) => todo!(),
-                        MapValueContent::List(ref items) => {
-                            let start_index = if start_index < 0 {
-                                items.len().saturating_add_signed(start_index)
-                            } else {
-                                start_index as usize
-                            };
-
-                            let end_index = if end_index < 0 {
-                                items.len().saturating_add_signed(end_index)
-                            } else if end_index as usize >= items.len() {
-                                items.len() - 1
-                            } else {
-                                end_index as usize
-                            };
-
-                            if start_index > end_index || start_index >= items.len() {
-                                serde_json::json!([])
-                            } else {
-                                serde_json::Value::Array(
-                                    items
-                                        .range(start_index..=end_index)
-                                        .map(Clone::clone)
-                                        .map(serde_json::Value::String)
-                                        .collect(),
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    serde_json::json!([])
-                };
-
-                resp::write(&mut tx, ret)
-                    .await
-                    .context("responding to lrange command")?;
-            }
-            "llen" => {
-                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
-                assert_eq!(values.len(), 0);
-
-                let len = if let Some(list) = state.map.get(key) {
-                    match list.value {
-                        MapValueContent::String(_) => todo!(),
-                        MapValueContent::List(ref items) => items.len(),
-                    }
-                } else {
-                    0
-                };
-
-                resp::write(&mut tx, serde_json::Value::from(len))
-                    .await
-                    .context("responding to llen command")?;
-            }
-            "lpop" => {
-                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
-
-                let count: Option<usize> = values
-                    .first()
-                    .map(|v| v.parse().expect("invalid lpop count"));
-
-                let ret = if let Some(mut list) = state.map.get_mut(key) {
-                    match list.value {
-                        MapValueContent::String(_) => todo!(),
-                        MapValueContent::List(ref mut items) => {
-                            if let Some(count) = count {
-                                (0..count)
-                                    .map(|_| items.pop_front())
-                                    .map(serde_json::Value::from)
-                                    .collect()
-                            } else if let Some(v) = items.pop_front() {
-                                serde_json::Value::from(v)
-                            } else {
-                                serde_json::Value::Null
-                            }
-                        }
-                    }
-                } else {
-                    serde_json::Value::Null
-                };
-
-                resp::write(&mut tx, ret)
-                    .await
-                    .context("responding to lpop command")?;
-            }
+            "set" => command::set(&state, args).await?,
+            "get" => command::get(&state, args).await?,
+            "rpush" => command::list::rpush(&state, args).await?,
+            "lpush" => command::list::lpush(&state, args).await?,
+            "lrange" => command::list::lrange(&state, args).await?,
+            "llen" => command::list::llen(&state, args).await?,
+            "lpop" => command::list::lpop(&state, args).await?,
+            "blpop" => command::list::blpop(&state, args).await?,
             _ => {
                 bail!("unknown command: {command:?}");
             }
+        };
+
+        if let Some(ret) = ret {
+            resp::write(&mut tx, ret)
+                .await
+                .context("responding to echo command")?;
         }
     }
 
@@ -299,9 +95,7 @@ async fn handle_connection(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let state = State {
-        map: Default::default(),
-    };
+    let state = State::default();
     let state = Arc::new(state);
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
 
