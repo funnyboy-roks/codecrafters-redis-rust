@@ -65,7 +65,7 @@ async fn handle_connection(
 
         let ret = match &*command.to_lowercase() {
             "ping" => {
-                tx.write_all(b"+PING\r\n").await?;
+                tx.write_all(b"+PONG\r\n").await?;
                 None
             }
             "echo" => {
