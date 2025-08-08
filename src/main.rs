@@ -3,7 +3,7 @@ use std::{collections::VecDeque, net::SocketAddr, sync::Arc, time::Duration};
 use anyhow::{bail, Context};
 use dashmap::DashMap;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::oneshot,
     time::Instant,
@@ -64,7 +64,10 @@ async fn handle_connection(
         let (command, args) = command.split_first().expect("command length >= 1");
 
         let ret = match &*command.to_lowercase() {
-            "ping" => Some(serde_json::json!("PING")),
+            "ping" => {
+                tx.write_all(b"+PING\r\n").await?;
+                None
+            }
             "echo" => {
                 let response = args[0].clone();
                 Some(serde_json::Value::from(response))
