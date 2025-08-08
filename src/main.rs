@@ -257,13 +257,21 @@ async fn handle_connection(
             }
             "lpop" => {
                 let (key, values) = args.split_first().expect("TODO: args.len() < 2");
-                assert_eq!(values.len(), 0);
+
+                let count: Option<usize> = values
+                    .first()
+                    .map(|v| v.parse().expect("invalid lpop count"));
 
                 let ret = if let Some(mut list) = state.map.get_mut(key) {
                     match list.value {
                         MapValueContent::String(_) => todo!(),
                         MapValueContent::List(ref mut items) => {
-                            if let Some(v) = items.pop_front() {
+                            if let Some(count) = count {
+                                (0..count)
+                                    .map(|_| items.pop_front())
+                                    .map(serde_json::Value::from)
+                                    .collect()
+                            } else if let Some(v) = items.pop_front() {
                                 serde_json::Value::from(v)
                             } else {
                                 serde_json::Value::Null
