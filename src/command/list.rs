@@ -234,9 +234,9 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
 
     let timeout = values
         .first()
-        .map(|v| v.parse::<u64>().expect("invalid lpop count"))
-        .and_then(|n| (n > 0).then_some(n))
-        .map(Duration::from_secs);
+        .map(|v| v.parse::<f64>().expect("invalid lpop count"))
+        .and_then(|n| (n > 0.).then_some(n))
+        .map(Duration::from_secs_f64);
 
     let wait = || async {
         let ret: anyhow::Result<serde_json::Value> = {
