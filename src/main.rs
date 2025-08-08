@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::VecDeque, net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{bail, Context};
 use dashmap::DashMap;
@@ -13,7 +13,7 @@ pub mod resp;
 #[derive(Debug, Clone)]
 enum MapValueContent {
     String(String),
-    List(Vec<String>),
+    List(VecDeque<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +126,7 @@ async fn handle_connection(
                     match list.value {
                         MapValueContent::String(_) => todo!(),
                         MapValueContent::List(ref mut items) => {
-                            items.extend_from_slice(values);
+                            items.extend(values.iter().map(String::clone));
                             items.len()
                         }
                     }
@@ -134,7 +134,47 @@ async fn handle_connection(
                     state.map.insert(
                         key.clone(),
                         MapValue {
-                            value: MapValueContent::List(values.to_vec()),
+                            value: MapValueContent::List(
+                                values.iter().map(String::clone).collect(),
+                            ),
+                            expires_at: None,
+                        },
+                    );
+                    values.len()
+                };
+
+                resp::write(
+                    &mut tx,
+                    serde_json::Value::Number(
+                        serde_json::Number::from_u128(len as _)
+                            .expect("len is probably <= u64::MAX"),
+                    ),
+                )
+                .await
+                .context("responding to rpush command")?;
+            }
+            "lpush" => {
+                let (key, values) = args.split_first().expect("TODO: args.len() < 2");
+
+                let len = if let Some(mut list) = state.map.get_mut(key) {
+                    match list.value {
+                        MapValueContent::String(_) => todo!(),
+                        MapValueContent::List(ref mut items) => {
+                            items.reserve(values.len());
+                            values
+                                .iter()
+                                .map(String::clone)
+                                .for_each(|v| items.push_front(v));
+                            items.len()
+                        }
+                    }
+                } else {
+                    state.map.insert(
+                        key.clone(),
+                        MapValue {
+                            value: MapValueContent::List(
+                                values.iter().rev().map(String::clone).collect(),
+                            ),
                             expires_at: None,
                         },
                     );
@@ -181,8 +221,8 @@ async fn handle_connection(
                                 serde_json::json!([])
                             } else {
                                 serde_json::Value::Array(
-                                    items[start_index..=end_index]
-                                        .iter()
+                                    items
+                                        .range(start_index..=end_index)
                                         .map(Clone::clone)
                                         .map(serde_json::Value::String)
                                         .collect(),
