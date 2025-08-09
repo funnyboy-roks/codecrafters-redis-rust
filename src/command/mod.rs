@@ -3,11 +3,11 @@ use std::time::Duration;
 use anyhow::Context;
 use tokio::time::Instant;
 
-use crate::{MapValue, MapValueContent, State};
+use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub mod list;
 
-pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, value, ..] = args else {
         todo!("args.len() < 2");
     };
@@ -24,27 +24,27 @@ pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<serde_
     };
 
     state.map.insert(key.clone(), value);
-    Ok(Some(serde_json::json!("OK")))
+    Ok(Some(Value::bulk_string("OK")))
 }
 
-pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let key = &args[0];
     let value = if let Some(value) = state.map.get(key) {
         if value.expires_at.is_none_or(|e| Instant::now() < e) {
             eprintln!("get {key} from map -> {:?}", value.value);
             match &value.value {
-                MapValueContent::String(string) => serde_json::Value::String(string.clone()),
-                MapValueContent::List(_) => serde_json::Value::Null,
+                MapValueContent::String(string) => Value::bulk_string(string.clone()),
+                MapValueContent::List(_) => Value::Null,
             }
         } else {
             drop(value);
             state.map.remove(key);
             eprintln!("remove {key} from map because expired");
-            serde_json::Value::Null
+            Value::Null
         }
     } else {
         eprintln!("get {key} from map -> (nil)");
-        serde_json::Value::Null
+        Value::Null
     };
 
     Ok(Some(value))

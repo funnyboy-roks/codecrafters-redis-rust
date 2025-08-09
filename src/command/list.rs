@@ -2,9 +2,9 @@ use std::{collections::VecDeque, time::Duration};
 
 use anyhow::Context;
 
-use crate::{MapValue, MapValueContent, State};
+use crate::{resp::Value, MapValue, MapValueContent, State};
 
-pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -66,10 +66,10 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
         og_len
     };
 
-    Ok(Some(serde_json::Value::from(len)))
+    Ok(Some(Value::from(len)))
 }
 
-pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let (key, mut values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -134,10 +134,10 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<serd
         og_len
     };
 
-    Ok(Some(serde_json::Value::from(len)))
+    Ok(Some(Value::from(len)))
 }
 
-pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, start_index, end_index, ..] = args else {
         todo!("args.len() < 3");
     };
@@ -164,26 +164,23 @@ pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Option<ser
                 };
 
                 if start_index > end_index || start_index >= items.len() {
-                    serde_json::json!([])
+                    Value::Array(Vec::new())
                 } else {
-                    serde_json::Value::Array(
-                        items
-                            .range(start_index..=end_index)
-                            .map(Clone::clone)
-                            .map(serde_json::Value::String)
-                            .collect(),
-                    )
+                    items
+                        .range(start_index..=end_index)
+                        .map(Value::bulk_string)
+                        .collect()
                 }
             }
         }
     } else {
-        serde_json::json!([])
+        Value::Array(Vec::new())
     };
 
     Ok(Some(ret))
 }
 
-pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
     assert_eq!(values.len(), 0);
 
@@ -196,10 +193,10 @@ pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Option<serde
         0
     };
 
-    Ok(Some(serde_json::Value::from(len)))
+    Ok(Some(Value::from(len)))
 }
 
-pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let count: Option<usize> = values
@@ -213,23 +210,24 @@ pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<serde
                 if let Some(count) = count {
                     (0..count)
                         .map(|_| items.pop_front())
-                        .map(serde_json::Value::from)
+                        .flat_map(|x| x)
+                        .map(Value::bulk_string)
                         .collect()
                 } else if let Some(v) = items.pop_front() {
-                    serde_json::Value::from(v)
+                    Value::bulk_string(v)
                 } else {
-                    serde_json::Value::Null
+                    Value::Null
                 }
             }
         }
     } else {
-        serde_json::Value::Null
+        Value::Null
     };
 
     Ok(Some(ret))
 }
 
-pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serde_json::Value>> {
+pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let timeout = values
@@ -239,7 +237,7 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
         .map(Duration::from_secs_f64);
 
     let wait = || async {
-        let ret: anyhow::Result<serde_json::Value> = {
+        let ret: anyhow::Result<Value> = {
             let (tx, rx) = tokio::sync::oneshot::channel();
             if let Some(mut waiting) = state.waiting_on_list.get_mut(key) {
                 waiting.push_back(tx);
@@ -252,14 +250,14 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
             let val = if let Some(timeout) = timeout {
                 match tokio::time::timeout(timeout, rx).await {
                     Ok(val) => val,
-                    Err(_) => return Ok(serde_json::Value::Null),
+                    Err(_) => return Ok(Value::Null),
                 }
             } else {
                 rx.await
             }
             .with_context(|| format!("Waiting for blpop on key '{key}'"))?;
 
-            Ok(serde_json::json!([key, val]))
+            Ok(Value::from_iter([key.clone(), val]))
         };
         ret
     };
@@ -269,7 +267,7 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<serd
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(ref mut items) => {
                 if let Some(v) = items.pop_front() {
-                    serde_json::json!([key, v])
+                    Value::from_iter([key.clone(), v])
                 } else {
                     drop(list);
                     wait().await?

@@ -2,8 +2,9 @@ use std::{collections::VecDeque, net::SocketAddr, sync::Arc};
 
 use anyhow::{bail, Context};
 use dashmap::DashMap;
+use resp::Value;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::oneshot,
     time::Instant,
@@ -64,13 +65,10 @@ async fn handle_connection(
         let (command, args) = command.split_first().expect("command length >= 1");
 
         let ret = match &*command.to_lowercase() {
-            "ping" => {
-                tx.write_all(b"+PONG\r\n").await?;
-                None
-            }
+            "ping" => Some(Value::simple_string("PONG")),
             "echo" => {
                 let response = args[0].clone();
-                Some(serde_json::Value::from(response))
+                Some(Value::BulkString(response))
             }
             "set" => command::set(&state, args).await?,
             "get" => command::get(&state, args).await?,
@@ -86,7 +84,7 @@ async fn handle_connection(
         };
 
         if let Some(ret) = ret {
-            resp::write(&mut tx, ret)
+            ret.write_to(&mut tx)
                 .await
                 .context("responding to echo command")?;
         }

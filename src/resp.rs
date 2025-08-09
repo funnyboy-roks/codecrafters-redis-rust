@@ -1,5 +1,7 @@
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+
 use anyhow::{bail, ensure, Context};
-use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Copy, Clone, Debug)]
@@ -12,7 +14,7 @@ pub enum DataKind {
     Array = b'*',
     Boolean = b'#',
     Double = b',',
-    BugNumber = b'(',
+    BigNumber = b'(',
     BulkError = b'!',
     VerbatimString = b'=',
     Map = b'%',
@@ -39,7 +41,7 @@ impl TryFrom<u8> for DataKind {
             b'*' => Ok(Self::Array),
             // b'#' => Ok(Self::Boolean),
             // b',' => Ok(Self::Double),
-            // b'(' => Ok(Self::BugNumber),
+            // b'(' => Ok(Self::BigNumber),
             // b'!' => Ok(Self::BulkError),
             // b'=' => Ok(Self::VerbatimString),
             // b'%' => Ok(Self::Map),
@@ -108,7 +110,7 @@ where
             // TODO: Confirm that this is a valid assumtion
             let data = String::from_utf8(buf).context("invalid utf-8 string")?;
 
-            Value::String(data)
+            serde_json::Value::String(data)
         }
         DataKind::Array => {
             take_until_delim(r, &mut buf).await?;
@@ -131,7 +133,7 @@ where
         }
         DataKind::Boolean => todo!(),
         DataKind::Double => todo!(),
-        DataKind::BugNumber => todo!(),
+        DataKind::BigNumber => todo!(),
         DataKind::BulkError => todo!(),
         DataKind::VerbatimString => todo!(),
         DataKind::Map => todo!(),
@@ -143,38 +145,138 @@ where
     Ok(value)
 }
 
-pub async fn write<W>(w: &mut W, value: serde_json::Value) -> anyhow::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    match value {
-        Value::Null => w
-            .write_all(b"$-1\r\n")
-            .await
-            .context("writing null json value")?,
-        Value::Bool(_) => todo!(),
-        Value::Number(n) => {
-            w.write_u8(DataKind::Integer.into()).await?;
-            w.write_all(format!("{}\r\n", n.as_u64().expect("numbers should be u64")).as_bytes())
-                .await?;
-        }
-        Value::String(s) => {
-            w.write_u8(DataKind::BulkString.into()).await?;
-            w.write_all(format!("{}\r\n", s.len()).as_bytes()).await?;
-            w.write_all(s.as_bytes()).await?;
-            w.write_all(b"\r\n").await?;
-        }
-        Value::Array(a) => {
-            w.write_u8(DataKind::Array.into()).await?;
-            w.write_all(format!("{}\r\n", a.len()).as_bytes()).await?;
-            for (i, v) in a.into_iter().enumerate() {
-                Box::pin(write(w, v))
-                    .await
-                    .with_context(|| format!("writing value at index {i} in array"))?;
-            }
-        }
-        Value::Object(_) => todo!(),
+#[derive(Clone, Debug)]
+#[repr(u8)]
+pub enum Value {
+    SimpleString(String),
+    SimpleError(String),
+    Integer(i64),
+    BulkString(String),
+    Null,
+    Array(Vec<Value>),
+    Boolean(bool),
+    Double(f64),
+    BigNumber(i128),
+    BulkError(String),
+    VerbatimString { encoding: [u8; 3], data: Vec<u8> },
+    Map(HashMap<Value, Value>),
+    Attribute(HashMap<Value, Value>),
+    Set(HashSet<Value>),
+    Push(Vec<Value>),
+}
+
+impl Value {
+    pub fn bulk_string(arg: impl Into<String>) -> Value {
+        Self::BulkString(arg.into())
     }
 
-    Ok(())
+    pub fn simple_string(arg: impl Into<String>) -> Value {
+        Self::SimpleString(arg.into())
+    }
+
+    pub async fn write_to<W>(self, w: &mut W) -> anyhow::Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        match self {
+            Value::SimpleString(s) => {
+                w.write_u8(DataKind::SimpleString.into()).await?;
+                w.write_all(format!("{}\r\n", s).as_bytes()).await?;
+            }
+            Value::SimpleError(_) => todo!(),
+            Value::Integer(n) => {
+                w.write_u8(DataKind::Integer.into()).await?;
+                w.write_all(format!("{}\r\n", n).as_bytes()).await?;
+            }
+            Value::BulkString(s) => {
+                w.write_u8(DataKind::BulkString.into()).await?;
+                w.write_all(format!("{}\r\n", s.len()).as_bytes()).await?;
+                w.write_all(s.as_bytes()).await?;
+                w.write_all(b"\r\n").await?;
+            }
+            Value::Null => w
+                .write_all(b"$-1\r\n")
+                .await
+                .context("writing null json value")?,
+            Value::Array(a) => {
+                w.write_u8(DataKind::Array.into()).await?;
+                w.write_all(format!("{}\r\n", a.len()).as_bytes()).await?;
+                for (i, v) in a.into_iter().enumerate() {
+                    Box::pin(v.write_to(w))
+                        .await
+                        .with_context(|| format!("writing value at index {i} in array"))?;
+                }
+            }
+            Value::Boolean(_) => todo!(),
+            Value::Double(_) => todo!(),
+            Value::BigNumber(_) => todo!(),
+            Value::BulkError(_) => todo!(),
+            Value::VerbatimString { .. } => todo!(),
+            Value::Map(_) => todo!(),
+            Value::Attribute(_) => todo!(),
+            Value::Set(_) => todo!(),
+            Value::Push(_) => todo!(),
+        }
+
+        Ok(())
+    }
+}
+
+impl Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Value::SimpleString(x) => x.hash(state),
+            Value::SimpleError(x) => x.hash(state),
+            Value::Integer(x) => x.hash(state),
+            Value::BulkString(x) => x.hash(state),
+            Value::Null => 0.hash(state),
+            Value::Array(x) => x.hash(state),
+            Value::Boolean(x) => x.hash(state),
+            // reinterprets the bits of `x` to be an integers and then hashes
+            Value::Double(x) => (unsafe { *(x as *const f64 as *const u64) }).hash(state),
+            Value::BigNumber(x) => x.hash(state),
+            Value::BulkError(x) => x.hash(state),
+            Value::VerbatimString { encoding, data } => (encoding, data).hash(state),
+            Value::Map(_) => todo!("hash a hash map"),
+            Value::Attribute(_) => todo!("hash a hash map"),
+            Value::Set(_) => todo!("hash a hash set"),
+            Value::Push(x) => x.hash(state),
+        }
+    }
+}
+
+macro_rules! from_int {
+    ($($ty: ident),+) => {
+        $(
+        impl From<$ty> for Value {
+            fn from(value: $ty) -> Self {
+                Value::Integer(value as i64)
+            }
+        }
+        )+
+    }
+}
+
+from_int![u8, u16, u32, usize];
+from_int![i8, i16, i32, isize];
+
+impl From<Vec<Value>> for Value {
+    fn from(value: Vec<Value>) -> Self {
+        Value::Array(value)
+    }
+}
+
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Value::BulkString(value)
+    }
+}
+
+impl<U> FromIterator<U> for Value
+where
+    U: Into<Value>,
+{
+    fn from_iter<T: IntoIterator<Item = U>>(iter: T) -> Self {
+        Value::Array(iter.into_iter().map(Into::into).collect())
+    }
 }
