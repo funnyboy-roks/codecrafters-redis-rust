@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::Context;
 
@@ -34,44 +37,48 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         .map(|x| (x[0].clone(), x[1].clone()))
         .collect();
 
-    let id = if let Some((millis, seq)) = id_string.split_once('-') {
-        let millis = millis.parse().context("millis provided invalid format")?;
+    let millis: u64 = if id_string == "*" {
+        assert_eq!(id_string, "*");
+        let millis: u64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("It's not < 1970")?
+            .as_millis()
+            .try_into()
+            .context("we're 584.9 million years in the future")?;
 
-        let seq = if seq == "*" {
-            if let Some(x) = state.map.get(key) {
-                match x.value {
-                    MapValueContent::String(_) => todo!(),
-                    MapValueContent::List(_) => todo!(),
-                    MapValueContent::Stream(ref map) => {
-                        if let Some(last) =
-                            map.range(..(millis + 1, 0)).map(|(k, _)| *k).next_back()
-                        {
-                            if last.0 == millis {
-                                last.1 + 1
-                            } else {
-                                0
-                            }
-                        } else if millis == 0 {
-                            1
-                        } else {
-                            0
-                        }
-                    }
-                }
-            } else if millis == 0 {
-                1
-            } else {
-                0
-            }
-        } else {
-            seq.parse().context("seq provided invalid format")?
-        };
-
-        (millis, seq)
+        millis
     } else {
-        // id = "*"
-        todo!();
+        let (millis, _) = id_string.split_once('-').context("invalid id")?;
+        millis.parse().context("millis provided invalid format")?
     };
+
+    let seq = if let Some((_, seq)) = id_string.split_once('-') {
+        seq.parse().context("seq provided invalid format")?
+    } else if let Some(x) = state.map.get(key) {
+        match x.value {
+            MapValueContent::String(_) => todo!(),
+            MapValueContent::List(_) => todo!(),
+            MapValueContent::Stream(ref map) => {
+                if let Some(last) = map.range(..(millis + 1, 0)).map(|(k, _)| *k).next_back() {
+                    if last.0 == millis {
+                        last.1 + 1
+                    } else {
+                        0
+                    }
+                } else if millis == 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+        }
+    } else if millis == 0 {
+        1
+    } else {
+        0
+    };
+
+    let id = (millis, seq);
 
     if id == (0, 0) {
         return Ok(Some(Value::simple_error(
