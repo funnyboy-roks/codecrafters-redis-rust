@@ -34,6 +34,7 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
 
                 len
             }
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         let mut values = values;
@@ -122,6 +123,7 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
 
                 len
             }
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         state.map.insert(
@@ -172,6 +174,7 @@ pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
                         .collect()
                 }
             }
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         Value::Array(Vec::new())
@@ -188,6 +191,7 @@ pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         match list.value {
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(ref items) => items.len(),
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         0
@@ -209,8 +213,7 @@ pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<Value
             MapValueContent::List(ref mut items) => {
                 if let Some(count) = count {
                     (0..count)
-                        .map(|_| items.pop_front())
-                        .flat_map(|x| x)
+                        .flat_map(|_| items.pop_front())
                         .map(Value::bulk_string)
                         .collect()
                 } else if let Some(v) = items.pop_front() {
@@ -219,6 +222,7 @@ pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<Value
                     Value::Null
                 }
             }
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         Value::Null
@@ -273,6 +277,7 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
                     wait().await?
                 }
             }
+            MapValueContent::Stream(_) => todo!(),
         }
     } else {
         wait().await?

@@ -36,6 +36,7 @@ pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Option<Value>
             match &value.value {
                 MapValueContent::String(string) => Value::bulk_string(string.clone()),
                 MapValueContent::List(_) => Value::Null,
+                MapValueContent::Stream(_) => Value::Null,
             }
         } else {
             drop(value);

@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use anyhow::{bail, Context};
 use dashmap::DashMap;
@@ -17,6 +21,7 @@ pub mod resp;
 enum MapValueContent {
     String(String),
     List(VecDeque<String>),
+    Stream(Vec<HashMap<String, String>>),
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +83,7 @@ async fn handle_connection(
             "blpop" => command::list::blpop(&state, args).await?,
 
             "type" => command::stream::ty(&state, args).await?,
+            "xadd" => command::stream::xadd(&state, args).await?,
 
             _ => {
                 bail!("unknown command: {command:?}");
