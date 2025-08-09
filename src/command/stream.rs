@@ -52,7 +52,11 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         millis.parse().context("millis provided invalid format")?
     };
 
-    let seq = if let Some((_, seq)) = id_string.split_once('-') {
+    let seq = if let Some(seq) = id_string
+        .split_once('-')
+        .map(|(_, s)| s)
+        .and_then(|s| (s != "*").then_some(s))
+    {
         seq.parse().context("seq provided invalid format")?
     } else if let Some(x) = state.map.get(key) {
         match x.value {
