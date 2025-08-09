@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     net::SocketAddr,
     sync::Arc,
 };
@@ -21,7 +21,7 @@ pub mod resp;
 enum MapValueContent {
     String(String),
     List(VecDeque<String>),
-    Stream(Vec<HashMap<String, String>>),
+    Stream(BTreeMap<(u64, u64), HashMap<String, String>>),
 }
 
 #[derive(Debug, Clone)]

@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+use anyhow::Context;
 
 use crate::{resp::Value, MapValueContent, State};
 
@@ -21,34 +23,63 @@ pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Option<Value>>
 }
 
 pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
-    let [key, entry_id, kv_pairs @ ..] = args else {
+    let [key, id_string, kv_pairs @ ..] = args else {
         todo!("args.len() < 2");
     };
 
     assert!(kv_pairs.len() % 2 == 0);
 
-    let mut obj: HashMap<_, _> = kv_pairs
+    let data: HashMap<_, _> = kv_pairs
         .chunks_exact(2)
         .map(|x| (x[0].clone(), x[1].clone()))
         .collect();
 
-    obj.insert("id".into(), entry_id.clone());
+    let id = if let Some((millis, seq)) = id_string.split_once('-') {
+        let millis = millis.parse().context("millis provided invalid format")?;
+        let seq = seq.parse().context("seq provided invalid format")?;
 
-    if let Some(mut x) = state.map.get_mut(key) {
+        (millis, seq)
+    } else {
+        // id = "*"
+        todo!();
+    };
+
+    let ret = if let Some(mut x) = state.map.get_mut(key) {
         match x.value {
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(_) => todo!(),
-            MapValueContent::Stream(ref mut s) => s.push(obj),
+            MapValueContent::Stream(ref mut s) => {
+                if let Some(last_id) = s.last_key_value().map(|(k, _)| *k) {
+                    if id > last_id {
+                        s.insert(id, data);
+                        Value::bulk_string(id_string)
+                    } else {
+                        Value::simple_error("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+                    }
+                } else {
+                    if id > (0, 0) {
+                        s.insert(id, data);
+                        Value::bulk_string(id_string)
+                    } else {
+                        Value::simple_error("ERR The ID specified in XADD must be greater than 0-0")
+                    }
+                }
+            }
         }
     } else {
-        state.map.insert(
-            key.clone(),
-            crate::MapValue {
-                value: MapValueContent::Stream(vec![obj]),
-                expires_at: None,
-            },
-        );
-    }
+        if id > (0, 0) {
+            state.map.insert(
+                key.clone(),
+                crate::MapValue {
+                    value: MapValueContent::Stream(BTreeMap::from_iter([(id, data)])),
+                    expires_at: None,
+                },
+            );
+            Value::bulk_string(id_string)
+        } else {
+            Value::simple_error("ERR The ID specified in XADD must be greater than 0-0")
+        }
+    };
 
-    Ok(Some(Value::bulk_string(entry_id)))
+    Ok(Some(ret))
 }

@@ -174,6 +174,14 @@ impl Value {
         Self::SimpleString(arg.into())
     }
 
+    pub fn bulk_error(arg: impl Into<String>) -> Value {
+        Self::BulkError(arg.into())
+    }
+
+    pub fn simple_error(arg: impl Into<String>) -> Value {
+        Self::SimpleError(arg.into())
+    }
+
     pub async fn write_to<W>(self, w: &mut W) -> anyhow::Result<()>
     where
         W: AsyncWrite + Unpin,
@@ -181,12 +189,15 @@ impl Value {
         match self {
             Value::SimpleString(s) => {
                 w.write_u8(DataKind::SimpleString.into()).await?;
-                w.write_all(format!("{}\r\n", s).as_bytes()).await?;
+                w.write_all(format!("{s}\r\n").as_bytes()).await?;
             }
-            Value::SimpleError(_) => todo!(),
+            Value::SimpleError(e) => {
+                w.write_u8(DataKind::SimpleError.into()).await?;
+                w.write_all(format!("{e}\r\n").as_bytes()).await?;
+            }
             Value::Integer(n) => {
                 w.write_u8(DataKind::Integer.into()).await?;
-                w.write_all(format!("{}\r\n", n).as_bytes()).await?;
+                w.write_all(format!("{n}\r\n").as_bytes()).await?;
             }
             Value::BulkString(s) => {
                 w.write_u8(DataKind::BulkString.into()).await?;
