@@ -116,30 +116,33 @@ fn id_to_value(id: (u64, u64)) -> Value {
     Value::bulk_string(format!("{}-{}", id.0, id.1))
 }
 
+fn parse_id((millis, seq): (&str, &str)) -> anyhow::Result<(u64, u64)> {
+    let millis = millis.parse().context("parsing start millis")?;
+    let seq = seq.parse().context("parsing start seq")?;
+    Ok((millis, seq))
+}
+
+fn parse_bound(
+    bound: &str,
+    unbounded_symbol: &str,
+    default: u64,
+) -> anyhow::Result<Bound<(u64, u64)>> {
+    Ok(if bound == unbounded_symbol {
+        Bound::Unbounded
+    } else if let Some(x) = bound.split_once('-') {
+        Bound::Included(parse_id(x)?)
+    } else {
+        Bound::Included((bound.parse().context("parsing bound")?, default))
+    })
+}
+
 pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, start, end, ..] = args else {
         todo!("args.len() < 3");
     };
 
-    let start = if start == "-" {
-        Bound::Unbounded
-    } else if let Some((millis, seq)) = start.split_once('-') {
-        let millis = millis.parse().context("parsing start millis")?;
-        let seq = seq.parse().context("parsing start seq")?;
-        Bound::Included((millis, seq))
-    } else {
-        Bound::Included((start.parse().context("parsing start")?, 0))
-    };
-
-    let end = if end == "+" {
-        Bound::Unbounded
-    } else if let Some((millis, seq)) = end.split_once('-') {
-        let millis = millis.parse().context("parsing end millis")?;
-        let seq = seq.parse().context("parsing end seq")?;
-        Bound::Included((millis, seq))
-    } else {
-        Bound::Included((end.parse().context("parsing end")?, u64::MAX))
-    };
+    let start = parse_bound(start, "-", 0)?;
+    let end = parse_bound(end, "+", u64::MAX)?;
 
     let ret = if let Some(x) = state.map.get(key) {
         match x.value {
@@ -149,6 +152,37 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
                 .range((start, end))
                 .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
                 .collect(),
+        }
+    } else {
+        Value::Null
+    };
+
+    Ok(Some(ret))
+}
+
+pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+    let [streams, key, start, ..] = args else {
+        todo!("args.len() < 3");
+    };
+
+    assert_eq!(streams, "streams");
+
+    let start = parse_id(
+        start
+            .split_once('-')
+            .expect("start should always be a valid id 🤞"),
+    )?;
+
+    let ret = if let Some(x) = state.map.get(key) {
+        match x.value {
+            MapValueContent::String(_) => todo!(),
+            MapValueContent::List(_) => todo!(),
+            MapValueContent::Stream(ref map) => Value::from_iter([Value::from_iter([
+                Value::bulk_string(key),
+                map.range((Bound::Excluded(start), Bound::Unbounded))
+                    .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
+                    .collect(),
+            ])]),
         }
     } else {
         Value::Null
