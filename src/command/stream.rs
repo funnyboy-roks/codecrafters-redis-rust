@@ -116,19 +116,32 @@ fn id_to_value(id: (u64, u64)) -> Value {
 }
 
 pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
-    let [key, start_ms, end_ms, ..] = args else {
+    let [key, start, end, ..] = args else {
         todo!("args.len() < 3");
     };
 
-    let start_ms: u64 = start_ms.parse().context("parsing start_ms")?;
-    let end_ms: u64 = end_ms.parse().context("parsing end_ms")?;
+    let start = if let Some((millis, seq)) = start.split_once('-') {
+        let millis = millis.parse().context("parsing start millis")?;
+        let seq = seq.parse().context("parsing start seq")?;
+        (millis, seq)
+    } else {
+        (start.parse().context("parsing start")?, 0)
+    };
+
+    let end = if let Some((millis, seq)) = end.split_once('-') {
+        let millis = millis.parse().context("parsing end millis")?;
+        let seq = seq.parse().context("parsing end seq")?;
+        (millis, seq)
+    } else {
+        (end.parse().context("parsing end")?, u64::MAX)
+    };
 
     let ret = if let Some(x) = state.map.get(key) {
         match x.value {
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(_) => todo!(),
             MapValueContent::Stream(ref map) => map
-                .range((start_ms, 0)..(end_ms, u64::MAX))
+                .range(start..=end)
                 .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
                 .collect(),
         }
