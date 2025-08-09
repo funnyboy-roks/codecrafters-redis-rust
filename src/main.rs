@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     net::SocketAddr,
     sync::Arc,
 };
@@ -21,7 +21,7 @@ pub mod resp;
 enum MapValueContent {
     String(String),
     List(VecDeque<String>),
-    Stream(BTreeMap<(u64, u64), HashMap<String, String>>),
+    Stream(BTreeMap<(u64, u64), Vec<String>>),
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +84,7 @@ async fn handle_connection(
 
             "type" => command::stream::ty(&state, args).await?,
             "xadd" => command::stream::xadd(&state, args).await?,
+            "xrange" => command::stream::xrange(&state, args).await?,
 
             _ => {
                 bail!("unknown command: {command:?}");

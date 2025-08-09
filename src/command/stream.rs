@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -31,11 +31,6 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
     };
 
     assert!(kv_pairs.len() % 2 == 0);
-
-    let data: HashMap<_, _> = kv_pairs
-        .chunks_exact(2)
-        .map(|x| (x[0].clone(), x[1].clone()))
-        .collect();
 
     let millis: u64 = if id_string == "*" {
         assert_eq!(id_string, "*");
@@ -100,18 +95,46 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
                         return Ok(Some(Value::simple_error("ERR The ID specified in XADD is equal or smaller than the target stream top item")));
                     }
                 }
-                s.insert(id, data);
+                s.insert(id, kv_pairs.into());
             }
         }
     } else {
         state.map.insert(
             key.clone(),
             MapValue {
-                value: MapValueContent::Stream(BTreeMap::from_iter([(id, data)])),
+                value: MapValueContent::Stream(BTreeMap::from_iter([(id, kv_pairs.into())])),
                 expires_at: None,
             },
         );
     }
 
-    Ok(Some(Value::bulk_string(format!("{}-{}", id.0, id.1))))
+    Ok(Some(id_to_value(id)))
+}
+
+fn id_to_value(id: (u64, u64)) -> Value {
+    Value::bulk_string(format!("{}-{}", id.0, id.1))
+}
+
+pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+    let [key, start_ms, end_ms, ..] = args else {
+        todo!("args.len() < 3");
+    };
+
+    let start_ms: u64 = start_ms.parse().context("parsing start_ms")?;
+    let end_ms: u64 = end_ms.parse().context("parsing end_ms")?;
+
+    let ret = if let Some(x) = state.map.get(key) {
+        match x.value {
+            MapValueContent::String(_) => todo!(),
+            MapValueContent::List(_) => todo!(),
+            MapValueContent::Stream(ref map) => map
+                .range((start_ms, 0)..(end_ms, u64::MAX))
+                .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
+                .collect(),
+        }
+    } else {
+        Value::Null
+    };
+
+    Ok(Some(ret))
 }

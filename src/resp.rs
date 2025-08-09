@@ -283,6 +283,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<&String> for Value {
+    fn from(value: &String) -> Self {
+        Value::BulkString(value.clone())
+    }
+}
+
 impl<U> FromIterator<U> for Value
 where
     U: Into<Value>,
