@@ -226,7 +226,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
     assert_eq!(keys.len(), starts.len());
 
     let ret = Arc::new(Mutex::new(Vec::<(String, Vec<Value>)>::with_capacity(
-        keys.len(),
+        if timeout.is_zero() { 1 } else { keys.len() },
     )));
 
     let mut jset = JoinSet::new();
@@ -262,6 +262,9 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
                     ret[idx].1.push(new);
                 } else {
                     ret.push((key.clone(), vec![new]));
+                    if timeout.is_zero() {
+                        return;
+                    }
                 }
             }
         }));
@@ -269,6 +272,9 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
 
     while let Some(x) = jset.join_next().await {
         let _ = x?;
+        if timeout.is_zero() {
+            break;
+        }
     }
 
     let ret = Arc::into_inner(ret)
