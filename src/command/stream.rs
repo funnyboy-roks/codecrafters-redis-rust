@@ -161,32 +161,40 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
 }
 
 pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
-    let [streams, key, start, ..] = args else {
+    let [streams_str, streams @ ..] = args else {
         todo!("args.len() < 3");
     };
 
-    assert_eq!(streams, "streams");
+    assert_eq!(streams_str, "streams");
+    assert_eq!(streams.len() % 2, 0);
 
-    let start = parse_id(
-        start
-            .split_once('-')
-            .expect("start should always be a valid id 🤞"),
-    )?;
+    let (keys, starts) = streams.split_at(streams.len() / 2);
 
-    let ret = if let Some(x) = state.map.get(key) {
-        match x.value {
-            MapValueContent::String(_) => todo!(),
-            MapValueContent::List(_) => todo!(),
-            MapValueContent::Stream(ref map) => Value::from_iter([Value::from_iter([
-                Value::bulk_string(key),
-                map.range((Bound::Excluded(start), Bound::Unbounded))
-                    .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
-                    .collect(),
-            ])]),
+    assert_eq!(keys.len(), starts.len());
+
+    let mut ret = Vec::with_capacity(keys.len());
+
+    for (key, start) in keys.iter().zip(starts) {
+        if let Some(x) = state.map.get(key) {
+            match x.value {
+                MapValueContent::String(_) => todo!(),
+                MapValueContent::List(_) => todo!(),
+                MapValueContent::Stream(ref map) => {
+                    let start = parse_id(
+                        start
+                            .split_once('-')
+                            .expect("start should always be a valid id 🤞"),
+                    )?;
+                    ret.push(Value::from_iter([
+                        Value::bulk_string(key),
+                        map.range((Bound::Excluded(start), Bound::Unbounded))
+                            .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
+                            .collect(),
+                    ]));
+                }
+            }
         }
-    } else {
-        Value::Null
-    };
+    }
 
-    Ok(Some(ret))
+    Ok(Some(Value::from(ret)))
 }
