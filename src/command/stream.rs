@@ -241,7 +241,13 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
         let ret = Arc::clone(&ret);
 
         let key = key.clone();
-        let start = parse_id(start.split_once('-').context("id should be correct")?)?;
+        let start = if start == "$" {
+            None
+        } else {
+            Some(parse_id(
+                start.split_once('-').context("id should be correct")?,
+            )?)
+        };
 
         let fut = async move {
             let mut rx = rx;
@@ -252,7 +258,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
                     .enumerate()
                     .find_map(|(i, v)| (v.0 == *key).then_some(i));
 
-                if id <= start {
+                if start.is_some_and(|start| id <= start) {
                     continue;
                 }
 
