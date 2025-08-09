@@ -36,7 +36,36 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
 
     let id = if let Some((millis, seq)) = id_string.split_once('-') {
         let millis = millis.parse().context("millis provided invalid format")?;
-        let seq = seq.parse().context("seq provided invalid format")?;
+
+        let seq = if seq == "*" {
+            if let Some(x) = state.map.get(key) {
+                match x.value {
+                    MapValueContent::String(_) => todo!(),
+                    MapValueContent::List(_) => todo!(),
+                    MapValueContent::Stream(ref map) => {
+                        if let Some(last) =
+                            map.range(..(millis + 1, 0)).map(|(k, _)| *k).next_back()
+                        {
+                            if last.0 == millis {
+                                last.1 + 1
+                            } else {
+                                0
+                            }
+                        } else if millis == 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                }
+            } else if millis == 0 {
+                1
+            } else {
+                0
+            }
+        } else {
+            seq.parse().context("seq provided invalid format")?
+        };
 
         (millis, seq)
     } else {
@@ -73,5 +102,5 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         );
     }
 
-    Ok(Some(Value::bulk_string(id_string)))
+    Ok(Some(Value::bulk_string(format!("{}-{}", id.0, id.1))))
 }
