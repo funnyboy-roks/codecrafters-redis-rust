@@ -66,18 +66,19 @@ async fn handle_connection(
 
         let ret = match &*command.to_lowercase() {
             "ping" => Some(Value::simple_string("PONG")),
-            "echo" => {
-                let response = args[0].clone();
-                Some(Value::BulkString(response))
-            }
+            "echo" => Some(Value::bulk_string(&args[0])),
             "set" => command::set(&state, args).await?,
             "get" => command::get(&state, args).await?,
+
             "rpush" => command::list::rpush(&state, args).await?,
             "lpush" => command::list::lpush(&state, args).await?,
             "lrange" => command::list::lrange(&state, args).await?,
             "llen" => command::list::llen(&state, args).await?,
             "lpop" => command::list::lpop(&state, args).await?,
             "blpop" => command::list::blpop(&state, args).await?,
+
+            "type" => command::stream::ty(&state, args).await?,
+
             _ => {
                 bail!("unknown command: {command:?}");
             }

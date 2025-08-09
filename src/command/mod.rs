@@ -6,6 +6,7 @@ use tokio::time::Instant;
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub mod list;
+pub mod stream;
 
 pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, value, ..] = args else {
