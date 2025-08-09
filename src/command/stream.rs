@@ -243,7 +243,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
         let key = key.clone();
         let start = parse_id(start.split_once('-').context("id should be correct")?)?;
 
-        jset.spawn(tokio::time::timeout(timeout, async move {
+        let fut = async move {
             let mut rx = rx;
             while let Some((id, kvp)) = rx.recv().await {
                 let mut ret = ret.lock().await;
@@ -267,11 +267,18 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
                     }
                 }
             }
-        }));
+        };
+        if timeout.is_zero() {
+            jset.spawn(fut);
+        } else {
+            jset.spawn(async move {
+                let _ = tokio::time::timeout(timeout, fut).await;
+            });
+        }
     }
 
     while let Some(x) = jset.join_next().await {
-        let _ = x?;
+        x?;
         if timeout.is_zero() {
             break;
         }
