@@ -1,10 +1,15 @@
 use std::{
     collections::BTreeMap,
     ops::Bound,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Context;
+use anyhow::{bail, Context};
+use tokio::{
+    sync::{mpsc, Mutex},
+    task::JoinSet,
+};
 
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
@@ -109,6 +114,20 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         );
     }
 
+    if let Some(mut txs) = state.waiting_on_stream.get_mut(key) {
+        let mut to_remove = Vec::new();
+        for (i, tx) in txs.iter().enumerate() {
+            // if send fails, then rx has been closed
+            if tx.send((id, kv_pairs.into())).is_err() {
+                to_remove.push(i);
+            }
+        }
+
+        for tr in to_remove.into_iter().rev() {
+            txs.remove(tr);
+        }
+    }
+
     Ok(Some(id_to_value(id)))
 }
 
@@ -160,12 +179,7 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
     Ok(Some(ret))
 }
 
-pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
-    let [streams_str, streams @ ..] = args else {
-        todo!("args.len() < 3");
-    };
-
-    assert_eq!(streams_str, "streams");
+async fn xread_streams(state: &State, streams: &[String]) -> anyhow::Result<Option<Value>> {
     assert_eq!(streams.len() % 2, 0);
 
     let (keys, starts) = streams.split_at(streams.len() / 2);
@@ -197,4 +211,83 @@ pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
     }
 
     Ok(Some(Value::from(ret)))
+}
+
+async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+    let [timeout, streams_str, streams @ ..] = args else {
+        todo!("args.len() < 3");
+    };
+    assert_eq!(streams_str, "streams");
+
+    let timeout = Duration::from_millis(timeout.parse().context("invalid timeout provided")?);
+
+    let (keys, starts) = streams.split_at(streams.len() / 2);
+
+    assert_eq!(keys.len(), starts.len());
+
+    let ret = Arc::new(Mutex::new(Vec::<(String, Vec<Value>)>::with_capacity(
+        keys.len(),
+    )));
+
+    let mut jset = JoinSet::new();
+    for (key, start) in keys.iter().zip(starts) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        state
+            .waiting_on_stream
+            .entry(key.clone())
+            .or_default()
+            .push(tx);
+
+        let ret = Arc::clone(&ret);
+
+        let key = key.clone();
+        let start = parse_id(start.split_once('-').context("id should be correct")?)?;
+
+        jset.spawn(tokio::time::timeout(timeout, async move {
+            let mut rx = rx;
+            while let Some((id, kvp)) = rx.recv().await {
+                let mut ret = ret.lock().await;
+                let idx = ret
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, v)| (v.0 == *key).then_some(i));
+
+                if id <= start {
+                    continue;
+                }
+
+                let new = Value::from_iter([id_to_value(id), Value::from_iter(kvp)]);
+
+                if let Some(idx) = idx {
+                    ret[idx].1.push(new);
+                } else {
+                    ret.push((key.clone(), vec![new]));
+                }
+            }
+        }));
+    }
+
+    while let Some(x) = jset.join_next().await {
+        let _ = x?;
+    }
+
+    let ret = Arc::into_inner(ret)
+        .expect("Everything dropped since the futures are done")
+        .into_inner();
+
+    Ok(Some(if ret.is_empty() {
+        Value::Null
+    } else {
+        ret.into_iter()
+            .map(|(k, v)| Value::from_iter([Value::from(k), Value::from(v)]))
+            .collect()
+    }))
+}
+
+pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+    match &*args[0] {
+        "streams" => xread_streams(state, &args[1..]).await,
+        "block" => xread_block(state, &args[1..]).await,
+        subcmd => bail!("Unknown subcommand '{subcmd}'"),
+    }
 }

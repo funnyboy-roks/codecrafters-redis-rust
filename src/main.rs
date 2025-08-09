@@ -10,7 +10,7 @@ use resp::Value;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{TcpListener, TcpStream},
-    sync::oneshot,
+    sync::{mpsc, oneshot},
     time::Instant,
 };
 
@@ -34,6 +34,7 @@ struct MapValue {
 pub struct State {
     map: DashMap<String, MapValue>,
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
+    waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<((u64, u64), Vec<String>)>>>,
 }
 
 async fn handle_connection(
