@@ -11,7 +11,7 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{resp::Value, MapValue, MapValueContent, State};
+use crate::{resp::Value, MapValue, MapValueContent, State, StreamEvent};
 
 pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, ..] = args else {
@@ -115,17 +115,13 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
     }
 
     if let Some(mut txs) = state.waiting_on_stream.get_mut(key) {
-        let mut to_remove = Vec::new();
-        for (i, tx) in txs.iter().enumerate() {
-            // if send fails, then rx has been closed
-            if tx.send((id, kv_pairs.into())).is_err() {
-                to_remove.push(i);
-            }
-        }
-
-        for tr in to_remove.into_iter().rev() {
-            txs.remove(tr);
-        }
+        txs.retain(|tx| {
+            tx.send(StreamEvent {
+                id,
+                kv_pairs: kv_pairs.into(),
+            })
+            .is_ok()
+        });
     }
 
     Ok(Some(id_to_value(id)))
@@ -251,7 +247,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
 
         let fut = async move {
             let mut rx = rx;
-            while let Some((id, kvp)) = rx.recv().await {
+            while let Some(StreamEvent { id, kv_pairs }) = rx.recv().await {
                 let mut ret = ret.lock().await;
                 let idx = ret
                     .iter()
@@ -262,7 +258,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
                     continue;
                 }
 
-                let new = Value::from_iter([id_to_value(id), Value::from_iter(kvp)]);
+                let new = Value::from_iter([id_to_value(id), Value::from_iter(kv_pairs)]);
 
                 if let Some(idx) = idx {
                     ret[idx].1.push(new);

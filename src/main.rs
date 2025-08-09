@@ -30,11 +30,16 @@ struct MapValue {
     expires_at: Option<Instant>,
 }
 
+struct StreamEvent {
+    id: (u64, u64),
+    kv_pairs: Vec<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct State {
     map: DashMap<String, MapValue>,
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
-    waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<((u64, u64), Vec<String>)>>>,
+    waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
 }
 
 async fn handle_connection(
