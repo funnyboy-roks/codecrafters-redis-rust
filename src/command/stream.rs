@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    ops::Bound,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -120,20 +121,24 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
         todo!("args.len() < 3");
     };
 
-    let start = if let Some((millis, seq)) = start.split_once('-') {
+    let start = if start == "-" {
+        Bound::Unbounded
+    } else if let Some((millis, seq)) = start.split_once('-') {
         let millis = millis.parse().context("parsing start millis")?;
         let seq = seq.parse().context("parsing start seq")?;
-        (millis, seq)
+        Bound::Included((millis, seq))
     } else {
-        (start.parse().context("parsing start")?, 0)
+        Bound::Included((start.parse().context("parsing start")?, 0))
     };
 
-    let end = if let Some((millis, seq)) = end.split_once('-') {
+    let end = if end == "+" {
+        Bound::Unbounded
+    } else if let Some((millis, seq)) = end.split_once('-') {
         let millis = millis.parse().context("parsing end millis")?;
         let seq = seq.parse().context("parsing end seq")?;
-        (millis, seq)
+        Bound::Included((millis, seq))
     } else {
-        (end.parse().context("parsing end")?, u64::MAX)
+        Bound::Included((end.parse().context("parsing end")?, u64::MAX))
     };
 
     let ret = if let Some(x) = state.map.get(key) {
@@ -141,7 +146,7 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
             MapValueContent::String(_) => todo!(),
             MapValueContent::List(_) => todo!(),
             MapValueContent::Stream(ref map) => map
-                .range(start..=end)
+                .range((start, end))
                 .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
                 .collect(),
         }
