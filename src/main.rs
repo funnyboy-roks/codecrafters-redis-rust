@@ -53,6 +53,46 @@ pub struct State {
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
 }
 
+async fn run_command(
+    state: &State,
+    txn: &mut Option<Vec<Vec<String>>>,
+    command: &[String],
+) -> anyhow::Result<Value> {
+    let (command, args) = command.split_first().expect("command length >= 1");
+
+    let ret = match &*command.to_lowercase() {
+        "ping" => Value::simple_string("PONG"),
+        "echo" => Value::bulk_string(&args[0]),
+        "set" => command::set(state, args).await?,
+        "get" => command::get(state, args).await?,
+
+        "rpush" => command::list::rpush(state, args).await?,
+        "lpush" => command::list::lpush(state, args).await?,
+        "lrange" => command::list::lrange(state, args).await?,
+        "llen" => command::list::llen(state, args).await?,
+        "lpop" => command::list::lpop(state, args).await?,
+        "blpop" => command::list::blpop(state, args).await?,
+
+        "type" => command::stream::ty(state, args).await?,
+        "xadd" => command::stream::xadd(state, args).await?,
+        "xrange" => command::stream::xrange(state, args).await?,
+        "xread" => command::stream::xread(state, args).await?,
+
+        "incr" => command::transaction::incr(state, args).await?,
+        "multi" => {
+            *txn = Some(Vec::new());
+            Value::simple_string("OK")
+        }
+        "exec" => Value::simple_error("ERR EXEC without MULTI"),
+
+        _ => {
+            bail!("unknown command: {command:?}");
+        }
+    };
+
+    Ok(ret)
+}
+
 async fn handle_connection(
     state: Arc<State>,
     mut stream: TcpStream,
@@ -72,60 +112,41 @@ async fn handle_connection(
         }
 
         let value = resp::parse(&mut buf).await.context("parsing value")?;
-        let command: Vec<String> = serde_json::from_value(value).context("parsing command")?;
+        let full_command: Vec<String> = serde_json::from_value(value).context("parsing command")?;
 
         eprintln!(
             "[{}:{}:{}] command = {:?}",
             file!(),
             line!(),
             column!(),
-            &command
+            &full_command
         );
 
         // TODO: handle error
-        assert!(!command.is_empty());
+        assert!(!full_command.is_empty());
 
-        let ret = if let Some(ref mut txn) = txn {
-            txn.push(command);
-            Some(Value::simple_string("QUEUED"))
-        } else {
-            let (command, args) = command.split_first().expect("command length >= 1");
-
-            match &*command.to_lowercase() {
-                "ping" => Some(Value::simple_string("PONG")),
-                "echo" => Some(Value::bulk_string(&args[0])),
-                "set" => command::set(&state, args).await?,
-                "get" => command::get(&state, args).await?,
-
-                "rpush" => command::list::rpush(&state, args).await?,
-                "lpush" => command::list::lpush(&state, args).await?,
-                "lrange" => command::list::lrange(&state, args).await?,
-                "llen" => command::list::llen(&state, args).await?,
-                "lpop" => command::list::lpop(&state, args).await?,
-                "blpop" => command::list::blpop(&state, args).await?,
-
-                "type" => command::stream::ty(&state, args).await?,
-                "xadd" => command::stream::xadd(&state, args).await?,
-                "xrange" => command::stream::xrange(&state, args).await?,
-                "xread" => command::stream::xread(&state, args).await?,
-
-                "incr" => command::transaction::incr(&state, args).await?,
-                "multi" => {
-                    txn = Some(Vec::new());
-                    Some(Value::simple_string("OK"))
+        let ret = if let Some(ref mut txn_inner) = txn {
+            let command = full_command.first().expect("command length >= 1");
+            if command.eq_ignore_ascii_case("exec") {
+                let mut ret = Vec::with_capacity(txn_inner.len());
+                for cmd in txn_inner {
+                    let mut new_txn = None;
+                    ret.push(run_command(&state, &mut new_txn, cmd).await?);
+                    assert!(new_txn.is_none());
                 }
-
-                _ => {
-                    bail!("unknown command: {command:?}");
-                }
+                txn = None;
+                ret.into()
+            } else {
+                txn_inner.push(full_command);
+                Value::simple_string("QUEUED")
             }
+        } else {
+            run_command(&state, &mut txn, &full_command).await?
         };
 
-        if let Some(ret) = ret {
-            ret.write_to(&mut tx)
-                .await
-                .context("responding to echo command")?;
-        }
+        ret.write_to(&mut tx)
+            .await
+            .context("responding to echo command")?;
     }
 
     eprintln!("Connection terminated: {addr}");

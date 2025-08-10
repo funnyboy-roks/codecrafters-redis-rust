@@ -2,7 +2,7 @@ use anyhow::bail;
 
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
-pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [key, ..] = args else {
         bail!("TODO: args.len() < 1");
     };
@@ -28,5 +28,5 @@ pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         Value::from(1)
     };
 
-    Ok(Some(value))
+    Ok(value)
 }

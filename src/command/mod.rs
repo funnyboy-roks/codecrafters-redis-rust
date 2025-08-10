@@ -9,7 +9,7 @@ pub mod list;
 pub mod stream;
 pub mod transaction;
 
-pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [key, value, ..] = args else {
         todo!("args.len() < 2");
     };
@@ -26,10 +26,10 @@ pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<Value>
     };
 
     state.map.insert(key.clone(), value);
-    Ok(Some(Value::bulk_string("OK")))
+    Ok(Value::bulk_string("OK"))
 }
 
-pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let key = &args[0];
     let value = if let Some(value) = state.map.get(key) {
         if value.expires_at.is_none_or(|e| Instant::now() < e) {
@@ -51,5 +51,5 @@ pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Option<Value>
         Value::Null
     };
 
-    Ok(Some(value))
+    Ok(value)
 }

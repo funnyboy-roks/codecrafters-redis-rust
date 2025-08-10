@@ -13,7 +13,7 @@ use tokio::{
 
 use crate::{resp::Value, MapValue, MapValueContent, State, StreamEvent};
 
-pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [key, ..] = args else {
         todo!("args.len() < 1");
     };
@@ -28,10 +28,10 @@ pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Option<Value>>
         "none"
     };
 
-    Ok(Some(Value::simple_string(kind)))
+    Ok(Value::simple_string(kind))
 }
 
-pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [key, id_string, kv_pairs @ ..] = args else {
         todo!("args.len() < 2");
     };
@@ -86,9 +86,9 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
     let id = (millis, seq);
 
     if id == (0, 0) {
-        return Ok(Some(Value::simple_error(
+        return Ok(Value::simple_error(
             "ERR The ID specified in XADD must be greater than 0-0",
-        )));
+        ));
     }
 
     if let Some(mut x) = state.map.get_mut(key) {
@@ -98,7 +98,7 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
             MapValueContent::Stream(ref mut s) => {
                 if let Some(last_id) = s.last_key_value().map(|(k, _)| *k) {
                     if id <= last_id {
-                        return Ok(Some(Value::simple_error("ERR The ID specified in XADD is equal or smaller than the target stream top item")));
+                        return Ok(Value::simple_error("ERR The ID specified in XADD is equal or smaller than the target stream top item"));
                     }
                 }
                 s.insert(id, kv_pairs.into());
@@ -124,7 +124,7 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         });
     }
 
-    Ok(Some(id_to_value(id)))
+    Ok(id_to_value(id))
 }
 
 fn id_to_value(id: (u64, u64)) -> Value {
@@ -151,7 +151,7 @@ fn parse_bound(
     })
 }
 
-pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [key, start, end, ..] = args else {
         todo!("args.len() < 3");
     };
@@ -172,10 +172,10 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
         Value::Null
     };
 
-    Ok(Some(ret))
+    Ok(ret)
 }
 
-async fn xread_streams(state: &State, streams: &[String]) -> anyhow::Result<Option<Value>> {
+async fn xread_streams(state: &State, streams: &[String]) -> anyhow::Result<Value> {
     assert_eq!(streams.len() % 2, 0);
 
     let (keys, starts) = streams.split_at(streams.len() / 2);
@@ -206,10 +206,10 @@ async fn xread_streams(state: &State, streams: &[String]) -> anyhow::Result<Opti
         }
     }
 
-    Ok(Some(Value::from(ret)))
+    Ok(Value::from(ret))
 }
 
-async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let [timeout, streams_str, streams @ ..] = args else {
         todo!("args.len() < 3");
     };
@@ -290,16 +290,16 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Option<Va
         .expect("Everything dropped since the futures are done")
         .into_inner();
 
-    Ok(Some(if ret.is_empty() {
+    Ok(if ret.is_empty() {
         Value::Null
     } else {
         ret.into_iter()
             .map(|(k, v)| Value::from_iter([Value::from(k), Value::from(v)]))
             .collect()
-    }))
+    })
 }
 
-pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
+pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Value> {
     match &*args[0] {
         "streams" => xread_streams(state, &args[1..]).await,
         "block" => xread_block(state, &args[1..]).await,
