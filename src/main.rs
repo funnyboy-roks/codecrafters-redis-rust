@@ -84,6 +84,7 @@ async fn run_command(
             Value::simple_string("OK")
         }
         "exec" => Value::simple_error("ERR EXEC without MULTI"),
+        "discard" => Value::simple_error("ERR DISCARD without MULTI"),
 
         _ => {
             bail!("unknown command: {command:?}");
@@ -136,6 +137,9 @@ async fn handle_connection(
                 }
                 txn = None;
                 ret.into()
+            } else if command.eq_ignore_ascii_case("discard") {
+                txn = None;
+                Value::simple_string("OK")
             } else {
                 txn_inner.push(full_command);
                 Value::simple_string("QUEUED")
