@@ -1,6 +1,6 @@
 use anyhow::bail;
 
-use crate::{resp::Value, MapValueContent, State};
+use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, ..] = args else {
@@ -22,7 +22,14 @@ pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Option<Value
             MapValueContent::Stream(_) => todo!("3/3"),
         }
     } else {
-        todo!("2/3")
+        state.map.insert(
+            key.clone(),
+            MapValue {
+                value: MapValueContent::String("1".into()),
+                expires_at: None,
+            },
+        );
+        Value::from(1)
     };
 
     Ok(Some(value))
