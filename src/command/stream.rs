@@ -20,7 +20,7 @@ pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Option<Value>>
 
     let kind = if let Some(val) = state.map.get(key) {
         match val.value {
-            MapValueContent::String(_) => "string",
+            MapValueContent::String(_) | MapValueContent::Integer(_) => "string",
             MapValueContent::List(_) => "list",
             MapValueContent::Stream(_) => "stream",
         }
@@ -61,7 +61,7 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
         seq.parse().context("seq provided invalid format")?
     } else if let Some(x) = state.map.get(key) {
         match x.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(_) => todo!(),
             MapValueContent::Stream(ref map) => {
                 if let Some(last) = map.range(..(millis + 1, 0)).map(|(k, _)| *k).next_back() {
@@ -93,7 +93,7 @@ pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Option<Value
 
     if let Some(mut x) = state.map.get_mut(key) {
         match x.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(_) => todo!(),
             MapValueContent::Stream(ref mut s) => {
                 if let Some(last_id) = s.last_key_value().map(|(k, _)| *k) {
@@ -161,7 +161,7 @@ pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
 
     let ret = if let Some(x) = state.map.get(key) {
         match x.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(_) => todo!(),
             MapValueContent::Stream(ref map) => map
                 .range((start, end))
@@ -187,7 +187,7 @@ async fn xread_streams(state: &State, streams: &[String]) -> anyhow::Result<Opti
     for (key, start) in keys.iter().zip(starts) {
         if let Some(x) = state.map.get(key) {
             match x.value {
-                MapValueContent::String(_) => todo!(),
+                MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
                 MapValueContent::List(_) => todo!(),
                 MapValueContent::Stream(ref map) => {
                     let start = parse_id(

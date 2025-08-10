@@ -9,23 +9,19 @@ pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Option<Value
 
     let value = if let Some(mut x) = state.map.get_mut(key) {
         match x.value {
-            MapValueContent::String(ref mut val) => {
-                if let Ok(num) = val.parse::<i64>() {
-                    let next = num + 1;
-                    *val = next.to_string();
-                    Value::from(next)
-                } else {
-                    todo!("3/3");
-                }
+            MapValueContent::Integer(ref mut val) => {
+                *val += 1;
+                Value::from(*val)
             }
-            MapValueContent::List(_) => todo!("3/3"),
-            MapValueContent::Stream(_) => todo!("3/3"),
+            MapValueContent::String(_) | MapValueContent::List(_) | MapValueContent::Stream(_) => {
+                Value::simple_error("ERR value is not an integer or out of range")
+            }
         }
     } else {
         state.map.insert(
             key.clone(),
             MapValue {
-                value: MapValueContent::String("1".into()),
+                value: MapValueContent::Integer(1),
                 expires_at: None,
             },
         );

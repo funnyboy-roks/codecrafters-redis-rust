@@ -19,9 +19,20 @@ pub mod resp;
 
 #[derive(Debug, Clone)]
 enum MapValueContent {
+    Integer(i64),
     String(String),
     List(VecDeque<String>),
     Stream(BTreeMap<(u64, u64), Vec<String>>),
+}
+
+impl From<&str> for MapValueContent {
+    fn from(value: &str) -> Self {
+        if let Ok(num) = value.parse() {
+            Self::Integer(num)
+        } else {
+            Self::String(value.into())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

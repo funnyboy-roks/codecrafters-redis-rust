@@ -11,7 +11,7 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
 
     let len = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref mut items) => {
                 items.extend(values.iter().map(String::clone));
                 let len = items.len();
@@ -95,7 +95,7 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
 
     let len = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref mut items) => {
                 let len = items.len() + og_len;
 
@@ -149,7 +149,7 @@ pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Option<Val
 
     let ret = if let Some(list) = state.map.get(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref items) => {
                 let start_index = if start_index < 0 {
                     items.len().saturating_add_signed(start_index)
@@ -189,7 +189,7 @@ pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Option<Value
 
     let len = if let Some(list) = state.map.get(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref items) => items.len(),
             MapValueContent::Stream(_) => todo!(),
         }
@@ -209,7 +209,7 @@ pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Option<Value
 
     let ret = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref mut items) => {
                 if let Some(count) = count {
                     (0..count)
@@ -268,7 +268,7 @@ pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Option<Valu
 
     let ret = if let Some(mut list) = state.map.get_mut(key) {
         match list.value {
-            MapValueContent::String(_) => todo!(),
+            MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref mut items) => {
                 if let Some(v) = items.pop_front() {
                     Value::from_iter([key.clone(), v])
