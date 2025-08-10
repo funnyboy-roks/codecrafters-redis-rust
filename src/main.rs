@@ -63,6 +63,7 @@ async fn handle_connection(
     let (rx, mut tx) = stream.split();
     let mut buf = BufReader::new(rx);
 
+    let mut txn: Option<Vec<Vec<String>>> = None;
     loop {
         let filled = buf.fill_buf().await?;
 
@@ -84,30 +85,39 @@ async fn handle_connection(
         // TODO: handle error
         assert!(!command.is_empty());
 
-        let (command, args) = command.split_first().expect("command length >= 1");
+        let ret = if let Some(ref mut txn) = txn {
+            txn.push(command);
+            Some(Value::simple_string("QUEUED"))
+        } else {
+            let (command, args) = command.split_first().expect("command length >= 1");
 
-        let ret = match &*command.to_lowercase() {
-            "ping" => Some(Value::simple_string("PONG")),
-            "echo" => Some(Value::bulk_string(&args[0])),
-            "set" => command::set(&state, args).await?,
-            "get" => command::get(&state, args).await?,
+            match &*command.to_lowercase() {
+                "ping" => Some(Value::simple_string("PONG")),
+                "echo" => Some(Value::bulk_string(&args[0])),
+                "set" => command::set(&state, args).await?,
+                "get" => command::get(&state, args).await?,
 
-            "rpush" => command::list::rpush(&state, args).await?,
-            "lpush" => command::list::lpush(&state, args).await?,
-            "lrange" => command::list::lrange(&state, args).await?,
-            "llen" => command::list::llen(&state, args).await?,
-            "lpop" => command::list::lpop(&state, args).await?,
-            "blpop" => command::list::blpop(&state, args).await?,
+                "rpush" => command::list::rpush(&state, args).await?,
+                "lpush" => command::list::lpush(&state, args).await?,
+                "lrange" => command::list::lrange(&state, args).await?,
+                "llen" => command::list::llen(&state, args).await?,
+                "lpop" => command::list::lpop(&state, args).await?,
+                "blpop" => command::list::blpop(&state, args).await?,
 
-            "type" => command::stream::ty(&state, args).await?,
-            "xadd" => command::stream::xadd(&state, args).await?,
-            "xrange" => command::stream::xrange(&state, args).await?,
-            "xread" => command::stream::xread(&state, args).await?,
+                "type" => command::stream::ty(&state, args).await?,
+                "xadd" => command::stream::xadd(&state, args).await?,
+                "xrange" => command::stream::xrange(&state, args).await?,
+                "xread" => command::stream::xread(&state, args).await?,
 
-            "incr" => command::transaction::incr(&state, args).await?,
+                "incr" => command::transaction::incr(&state, args).await?,
+                "multi" => {
+                    txn = Some(Vec::new());
+                    Some(Value::simple_string("OK"))
+                }
 
-            _ => {
-                bail!("unknown command: {command:?}");
+                _ => {
+                    bail!("unknown command: {command:?}");
+                }
             }
         };
 
