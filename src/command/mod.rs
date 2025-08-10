@@ -7,6 +7,7 @@ use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub mod list;
 pub mod stream;
+pub mod transaction;
 
 pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Option<Value>> {
     let [key, value, ..] = args else {

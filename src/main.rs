@@ -93,6 +93,8 @@ async fn handle_connection(
             "xrange" => command::stream::xrange(&state, args).await?,
             "xread" => command::stream::xread(&state, args).await?,
 
+            "incr" => command::transaction::incr(&state, args).await?,
+
             _ => {
                 bail!("unknown command: {command:?}");
             }

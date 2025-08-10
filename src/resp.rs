@@ -269,7 +269,7 @@ macro_rules! from_int {
 }
 
 from_int![u8, u16, u32, usize];
-from_int![i8, i16, i32, isize];
+from_int![i8, i16, i32, i64, isize];
 
 impl From<Vec<Value>> for Value {
     fn from(value: Vec<Value>) -> Self {
