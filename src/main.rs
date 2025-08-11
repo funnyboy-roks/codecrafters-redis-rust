@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use dashmap::DashMap;
+use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -68,6 +69,8 @@ pub struct State {
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
     role: Role,
+    replication_id: String,
+    replication_offset: u64,
 }
 
 impl State {
@@ -77,6 +80,12 @@ impl State {
             waiting_on_list: Default::default(),
             waiting_on_stream: Default::default(),
             role,
+            replication_id: rand::rng()
+                .sample_iter(Alphanumeric)
+                .take(40)
+                .map(char::from)
+                .collect(),
+            replication_offset: 0,
         }
     }
 }
