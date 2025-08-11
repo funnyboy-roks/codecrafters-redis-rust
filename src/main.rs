@@ -127,7 +127,7 @@ impl State {
             .context("reading response from first REPLCONF command")?;
 
         ensure!(ok == serde_json::json!("OK"));
-        eprintln!("received first REPLCONF response from ping command");
+        eprintln!("received OK response from first REPLCONF command");
 
         Value::from_iter(["REPLCONF", "capa", "psync2"])
             .write_to(&mut tx)
@@ -139,7 +139,20 @@ impl State {
             .context("reading response from second REPLCONF command")?;
 
         ensure!(ok == serde_json::json!("OK"));
-        eprintln!("received second REPLCONF response from ping command");
+        eprintln!("received OK response from second REPLCONF command");
+
+        Value::from_iter(["PSYNC", "?", "-1"])
+            .write_to(&mut tx)
+            .await
+            .context("sending PSYNC in handshake")?;
+
+        let ok = resp::parse(&mut rx)
+            .await
+            .context("reading response from PSYNC command")?;
+
+        dbg!(&ok);
+        ensure!(ok.as_str().unwrap().starts_with("FULLRESYNC"));
+        eprintln!("received FULLRESYNC response from PSYNC command");
 
         Ok(())
     }
@@ -180,6 +193,7 @@ async fn run_command(
 
         "info" => command::replication::info(state, args).await?,
         "replconf" => command::replication::replconf(state, args).await?,
+        "psync" => command::replication::psync(state, args).await?,
 
         _ => {
             bail!("unknown command: {command:?}");

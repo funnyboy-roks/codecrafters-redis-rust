@@ -30,3 +30,19 @@ pub async fn replconf(_state: &State, args: &[String]) -> anyhow::Result<Value> 
     );
     Ok(Value::simple_string("OK"))
 }
+
+pub async fn psync(state: &State, args: &[String]) -> anyhow::Result<Value> {
+    let [replication_id, replication_offset] = args else {
+        bail!("TODO: args.len() != 2");
+    };
+
+    ensure!(
+        replication_id == "?" && replication_offset == "-1",
+        "Replication id is not '?', got {replication_id} OR Replication offset is not '-1', got {replication_offset}"
+    );
+
+    Ok(Value::simple_string(format!(
+        "FULLRESYNC {} {}",
+        state.replication_id, state.replication_offset
+    )))
+}
