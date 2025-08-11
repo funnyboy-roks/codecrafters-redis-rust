@@ -10,7 +10,7 @@ use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWrite, BufReader},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     time::Instant,
@@ -154,15 +154,25 @@ impl State {
         ensure!(ok.as_str().unwrap().starts_with("FULLRESYNC"));
         eprintln!("received FULLRESYNC response from PSYNC command");
 
+        let rdb_file = resp::get_rdb(&mut rx)
+            .await
+            .context("reading response from PSYNC command")?;
+
+        dbg!(rdb_file);
+
         Ok(())
     }
 }
 
-async fn run_command(
+async fn run_command<W>(
     state: &State,
     txn: &mut Option<Vec<Vec<String>>>,
     command: &[String],
-) -> anyhow::Result<Value> {
+    tx: &mut W,
+) -> anyhow::Result<Value>
+where
+    W: AsyncWrite + Unpin,
+{
     let (command, args) = command.split_first().expect("command length >= 1");
 
     let ret = match &*command.to_lowercase() {
@@ -193,7 +203,7 @@ async fn run_command(
 
         "info" => command::replication::info(state, args).await?,
         "replconf" => command::replication::replconf(state, args).await?,
-        "psync" => command::replication::psync(state, args).await?,
+        "psync" => command::replication::psync(state, args, tx).await?,
 
         _ => {
             bail!("unknown command: {command:?}");
@@ -241,7 +251,7 @@ async fn handle_connection(
                 let mut ret = Vec::with_capacity(txn_inner.len());
                 for cmd in txn_inner {
                     let mut new_txn = None;
-                    ret.push(run_command(&state, &mut new_txn, cmd).await?);
+                    ret.push(run_command(&state, &mut new_txn, cmd, &mut tx).await?);
                     assert!(new_txn.is_none());
                 }
                 txn = None;
@@ -254,7 +264,7 @@ async fn handle_connection(
                 Value::simple_string("QUEUED")
             }
         } else {
-            run_command(&state, &mut txn, &full_command).await?
+            run_command(&state, &mut txn, &full_command, &mut tx).await?
         };
 
         ret.write_to(&mut tx)

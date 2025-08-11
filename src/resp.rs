@@ -4,7 +4,7 @@ use std::hash::Hash;
 use anyhow::{bail, ensure, Context};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DataKind {
     SimpleString = b'+',
@@ -79,6 +79,34 @@ where
 
     ensure!(buf == *b"\r\n", "Expected buf to be '\\r\\n', got {buf:?}");
     Ok(())
+}
+
+pub async fn get_rdb<R>(r: &mut R) -> anyhow::Result<Vec<u8>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let kind = r.read_u8().await?;
+    let kind = DataKind::try_from(kind)?;
+    ensure!(
+        kind == DataKind::BulkString,
+        "Expected rdb to start with '$'"
+    );
+
+    let mut buf = Vec::new();
+    take_until_delim(r, &mut buf)
+        .await
+        .context("reading \\r\\n")?;
+
+    let len: usize = String::from_utf8(std::mem::take(&mut buf))
+        .context("invalid utf-8 string")?
+        .parse()
+        .context("invalid length string")?;
+
+    buf.resize(len, 0);
+
+    r.read_exact(&mut buf).await?;
+
+    Ok(buf)
 }
 
 pub async fn parse<R>(r: &mut R) -> anyhow::Result<serde_json::Value>
@@ -157,6 +185,7 @@ pub enum Value {
     SimpleError(String),
     Integer(i64),
     BulkString(String),
+    Rdb(Vec<u8>),
     Null,
     Array(Vec<Value>),
     Boolean(bool),
@@ -210,6 +239,11 @@ impl Value {
                 w.write_all(s.as_bytes()).await?;
                 w.write_all(b"\r\n").await?;
             }
+            Value::Rdb(s) => {
+                w.write_u8(DataKind::BulkString.into()).await?;
+                w.write_all(format!("{}\r\n", s.len()).as_bytes()).await?;
+                w.write_all(&s).await?;
+            }
             Value::Null => w
                 .write_all(b"$-1\r\n")
                 .await
@@ -245,10 +279,10 @@ impl Hash for Value {
             Value::SimpleError(x) => x.hash(state),
             Value::Integer(x) => x.hash(state),
             Value::BulkString(x) => x.hash(state),
+            Value::Rdb(x) => x.hash(state),
             Value::Null => 0.hash(state),
             Value::Array(x) => x.hash(state),
             Value::Boolean(x) => x.hash(state),
-            // reinterprets the bits of `x` to be an integers and then hashes
             Value::Double(x) => (unsafe { *(x as *const f64 as *const u64) }).hash(state),
             Value::BigNumber(x) => x.hash(state),
             Value::BulkError(x) => x.hash(state),
