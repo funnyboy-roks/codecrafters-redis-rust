@@ -108,7 +108,7 @@ impl State {
             .await
             .context("reading response to PING command")?;
 
-        epritnln!("received pong response from ping command");
+        eprintln!("received pong response from ping command");
         ensure!(pong == serde_json::json!("PONG"));
 
         Ok(())
