@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
+    fmt::Display,
     net::SocketAddr,
     sync::Arc,
 };
@@ -46,11 +47,38 @@ struct StreamEvent {
     kv_pairs: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Role {
+    Master,
+    Replica(String),
+}
+
+impl Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Role::Master => write!(f, "master"),
+            Role::Replica(_) => write!(f, "replica"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct State {
     map: DashMap<String, MapValue>,
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
+    role: Role,
+}
+
+impl State {
+    fn new(role: Role) -> Self {
+        Self {
+            map: Default::default(),
+            waiting_on_list: Default::default(),
+            waiting_on_stream: Default::default(),
+            role,
+        }
+    }
 }
 
 async fn run_command(
@@ -85,6 +113,8 @@ async fn run_command(
         }
         "exec" => Value::simple_error("ERR EXEC without MULTI"),
         "discard" => Value::simple_error("ERR DISCARD without MULTI"),
+
+        "info" => command::replication::info(state, args).await?,
 
         _ => {
             bail!("unknown command: {command:?}");
@@ -163,17 +193,35 @@ async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args();
     let program = args.next().expect("program is required");
 
-    let port = if let Some("--port" | "-p") = args.next().as_deref() {
-        let Some(port) = args.next() else {
-            eprintln!("Usage: {program} [--port|-p <port>]");
-            std::process::exit(1);
-        };
-        port.parse().context("malformed port")?
-    } else {
-        6379
+    let print_usage = || -> ! {
+        eprintln!("Usage: {program} [--port|-p <port>] [--replicaof <hostname port>]");
+        std::process::exit(1);
     };
 
-    let state = State::default();
+    let mut port = 6379;
+    let mut master: Option<String> = None;
+    while let Some(arg) = args.next() {
+        match &*arg {
+            "--port" | "-p" => {
+                let Some(port_str) = args.next() else {
+                    print_usage();
+                };
+                port = port_str.parse().context("malformed port")?;
+            }
+            "--replicaof" => {
+                let Some(master_str) = args.next() else {
+                    print_usage();
+                };
+                let (host, port) = master_str
+                    .split_once(' ')
+                    .context("malformed master server string")?;
+                master = Some(format!("{host}:{port}"));
+            }
+            _ => bail!("Unexpected argument: {arg}"),
+        }
+    }
+
+    let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master));
     let state = Arc::new(state);
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).await?;

@@ -6,6 +6,7 @@ use tokio::time::Instant;
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub mod list;
+pub mod replication;
 pub mod stream;
 pub mod transaction;
 
