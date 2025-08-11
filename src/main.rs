@@ -71,10 +71,11 @@ pub struct State {
     role: Role,
     replication_id: String,
     replication_offset: u64,
+    listening_port: u16,
 }
 
 impl State {
-    fn new(role: Role) -> Self {
+    fn new(role: Role, listening_port: u16) -> Self {
         Self {
             map: Default::default(),
             waiting_on_list: Default::default(),
@@ -86,6 +87,7 @@ impl State {
                 .map(char::from)
                 .collect(),
             replication_offset: 0,
+            listening_port,
         }
     }
 
@@ -96,20 +98,48 @@ impl State {
 
         let mut stream = TcpStream::connect(master).await?;
         let (rx, mut tx) = stream.split();
+        let mut rx = BufReader::new(rx);
 
+        // PING command
         Value::from_iter(["PING"])
             .write_to(&mut tx)
             .await
-            .context("sending ping in handshake")?;
-
-        let mut rx = BufReader::new(rx);
+            .context("sending PING in handshake")?;
 
         let pong = resp::parse(&mut rx)
             .await
             .context("reading response to PING command")?;
 
-        eprintln!("received pong response from ping command");
         ensure!(pong == serde_json::json!("PONG"));
+        eprintln!("received pong response from ping command");
+
+        Value::from_iter([
+            "REPLCONF",
+            "listening-port",
+            &self.listening_port.to_string(),
+        ])
+        .write_to(&mut tx)
+        .await
+        .context("sending first REPLCONF in handshake")?;
+
+        let ok = resp::parse(&mut rx)
+            .await
+            .context("reading response from first REPLCONF command")?;
+
+        ensure!(ok == serde_json::json!("OK"));
+        eprintln!("received first REPLCONF response from ping command");
+
+        Value::from_iter(["REPLCONF", "capa", "psync2"])
+            .write_to(&mut tx)
+            .await
+            .context("sending second REPLCONF in handshake")?;
+
+        let ok = resp::parse(&mut rx)
+            .await
+            .context("reading response from second REPLCONF command")?;
+
+        ensure!(ok == serde_json::json!("OK"));
+        eprintln!("received second REPLCONF response from ping command");
 
         Ok(())
     }
@@ -149,6 +179,7 @@ async fn run_command(
         "discard" => Value::simple_error("ERR DISCARD without MULTI"),
 
         "info" => command::replication::info(state, args).await?,
+        "replconf" => command::replication::replconf(state, args).await?,
 
         _ => {
             bail!("unknown command: {command:?}");
@@ -205,7 +236,7 @@ async fn handle_connection(
                 txn = None;
                 Value::simple_string("OK")
             } else {
-                txn_inner.push(full_command);
+                txn_inner.push(full_command.clone());
                 Value::simple_string("QUEUED")
             }
         } else {
@@ -214,7 +245,7 @@ async fn handle_connection(
 
         ret.write_to(&mut tx)
             .await
-            .context("responding to echo command")?;
+            .with_context(|| format!("responding to {:?} command", full_command.first()))?;
     }
 
     eprintln!("Connection terminated: {addr}");
@@ -255,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master));
+    let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master), port);
     let state = Arc::new(state);
 
     if let Role::Replica(_) = state.role {

@@ -10,7 +10,7 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
     };
     ensure!(
         section == "replication",
-        "Section {section} is not implemented."
+        "Section '{section}' is not implemented."
     );
     let mut s = String::new();
     writeln!(s, "role:{}", state.role).expect("write to string does not fail");
@@ -18,4 +18,15 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
     writeln!(s, "master_repl_offset:{}", state.replication_offset)
         .expect("write to string does not fail");
     Ok(Value::from(s))
+}
+
+pub async fn replconf(_state: &State, args: &[String]) -> anyhow::Result<Value> {
+    let [field, ..] = args else {
+        bail!("TODO: args.len() < 1");
+    };
+    ensure!(
+        field == "listening-port" || field == "capa",
+        "Field '{field}' is not supported."
+    );
+    Ok(Value::simple_string("OK"))
 }
