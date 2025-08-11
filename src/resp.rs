@@ -90,7 +90,12 @@ where
 
     let mut buf = Vec::new();
     let value = match kind {
-        DataKind::SimpleString => todo!(),
+        DataKind::SimpleString => {
+            take_until_delim(r, &mut buf).await?;
+            serde_json::Value::from(
+                String::from_utf8(buf).context("invalid utf-8 in simple string")?,
+            )
+        }
         DataKind::SimpleError => todo!(),
         DataKind::Integer => todo!(),
         DataKind::BulkString => {
@@ -280,6 +285,12 @@ impl From<Vec<Value>> for Value {
 impl From<String> for Value {
     fn from(value: String) -> Self {
         Value::BulkString(value)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::BulkString(value.into())
     }
 }
 

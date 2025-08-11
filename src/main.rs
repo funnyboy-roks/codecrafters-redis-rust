@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, Context};
+use anyhow::{bail, ensure, Context};
 use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
@@ -87,6 +87,31 @@ impl State {
                 .collect(),
             replication_offset: 0,
         }
+    }
+
+    async fn do_handshake(self: Arc<Self>) -> anyhow::Result<()> {
+        let Role::Replica(ref master) = self.role else {
+            panic!("this redis server is not a replica!");
+        };
+
+        let mut stream = TcpStream::connect(master).await?;
+        let (rx, mut tx) = stream.split();
+
+        Value::from_iter(["PING"])
+            .write_to(&mut tx)
+            .await
+            .context("sending ping in handshake")?;
+
+        let mut rx = BufReader::new(rx);
+
+        let pong = resp::parse(&mut rx)
+            .await
+            .context("reading response to PING command")?;
+
+        epritnln!("received pong response from ping command");
+        ensure!(pong == serde_json::json!("PONG"));
+
+        Ok(())
     }
 }
 
@@ -232,6 +257,12 @@ async fn main() -> anyhow::Result<()> {
 
     let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master));
     let state = Arc::new(state);
+
+    if let Role::Replica(_) = state.role {
+        let state = Arc::clone(&state);
+        state.do_handshake().await?;
+    }
+
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).await?;
 
