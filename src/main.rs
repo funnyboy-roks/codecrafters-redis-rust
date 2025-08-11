@@ -160,9 +160,25 @@ async fn handle_connection(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let mut args = std::env::args();
+    let program = args.next().expect("program is required");
+
+    let port = if let Some("--port" | "-p") = args.next().as_deref() {
+        let Some(port) = args.next() else {
+            eprintln!("Usage: {program} [--port|-p <port>]");
+            std::process::exit(1);
+        };
+        port.parse().context("malformed port")?
+    } else {
+        6379
+    };
+
     let state = State::default();
     let state = Arc::new(state);
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let addr = format!("127.0.0.1:{port}");
+    let listener = TcpListener::bind(&addr).await?;
+
+    eprintln!("Listening for connections at {addr}.");
 
     loop {
         let (stream, addr) = listener.accept().await?;
