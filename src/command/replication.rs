@@ -21,7 +21,11 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::from(s))
 }
 
-pub async fn replconf(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn replconf(
+    state: &State,
+    args: &[String],
+    tx: &mpsc::UnboundedSender<Value>,
+) -> anyhow::Result<Value> {
     let [field, args @ ..] = args else {
         bail!("TODO: args.len() < 1");
     };
@@ -30,7 +34,12 @@ pub async fn replconf(state: &State, args: &[String]) -> anyhow::Result<Value> {
         "listening-port" | "capa" => Value::simple_string("OK"),
         "getack" => {
             ensure!(args[0] == "*", "args[0] == '{}'", args[0]);
-            Value::from_iter(["REPLCONF", "ACK", &state.replication_offset.to_string()])
+            tx.send(Value::from_iter([
+                "REPLCONF",
+                "ACK",
+                &state.replication_offset.to_string(),
+            ]))?;
+            Value::Null
         }
         _ => bail!("Field '{field}' is not supported."),
     };
@@ -60,8 +69,5 @@ pub async fn psync(
     )))
     .context("Sending FULLSYNC response")?;
 
-    tx.send(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))
-        .context("Sending FULLSYNC rdb response")?;
-
-    Ok(Value::from_iter(["replconf", "getack", "*"]))
+    Ok(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))
 }

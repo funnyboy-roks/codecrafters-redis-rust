@@ -176,7 +176,7 @@ impl Command {
             Command::Discard => Value::simple_error("ERR DISCARD without MULTI"),
 
             Command::Info => replication::info(state, args).await?,
-            Command::ReplConf => replication::replconf(state, args).await?,
+            Command::ReplConf => replication::replconf(state, args, tx).await?,
             Command::PSync => replication::psync(state, args, tx).await?,
         };
 

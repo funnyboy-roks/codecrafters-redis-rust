@@ -273,8 +273,10 @@ where
             };
 
             dbg!(&ret);
-            tx.send(ret)
-                .with_context(|| format!("responding to {:?} command", full_command.first()))?;
+            if !state.is_replica() {
+                tx.send(ret)
+                    .with_context(|| format!("responding to {:?} command", full_command.first()))?;
+            }
         }
     }
     let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx));
