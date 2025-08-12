@@ -216,7 +216,7 @@ impl Value {
         Self::SimpleError(arg.into())
     }
 
-    pub async fn write_to<W>(self, w: &mut W) -> anyhow::Result<()>
+    pub async fn write_to<W>(&self, w: &mut W) -> anyhow::Result<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -242,7 +242,7 @@ impl Value {
             Value::Rdb(s) => {
                 w.write_u8(DataKind::BulkString.into()).await?;
                 w.write_all(format!("{}\r\n", s.len()).as_bytes()).await?;
-                w.write_all(&s).await?;
+                w.write_all(s).await?;
             }
             Value::Null => w
                 .write_all(b"$-1\r\n")
@@ -251,7 +251,7 @@ impl Value {
             Value::Array(a) => {
                 w.write_u8(DataKind::Array.into()).await?;
                 w.write_all(format!("{}\r\n", a.len()).as_bytes()).await?;
-                for (i, v) in a.into_iter().enumerate() {
+                for (i, v) in a.iter().enumerate() {
                     Box::pin(v.write_to(w))
                         .await
                         .with_context(|| format!("writing value at index {i} in array"))?;

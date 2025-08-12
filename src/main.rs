@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Display,
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     sync::Arc,
 };
 
@@ -104,16 +104,16 @@ impl State {
         };
 
         let mut stream = TcpStream::connect(master).await?;
-        let (rx, mut tx) = stream.split();
-        let mut rx = BufReader::new(rx);
+        let (read, mut write) = stream.split();
+        let mut read = BufReader::new(read);
 
         // PING command
         Value::from_iter(["PING"])
-            .write_to(&mut tx)
+            .write_to(&mut write)
             .await
             .context("sending PING in handshake")?;
 
-        let pong = resp::parse(&mut rx)
+        let pong = resp::parse(&mut read)
             .await
             .context("reading response to PING command")?;
 
@@ -125,11 +125,11 @@ impl State {
             "listening-port",
             &self.listening_port.to_string(),
         ])
-        .write_to(&mut tx)
+        .write_to(&mut write)
         .await
         .context("sending first REPLCONF in handshake")?;
 
-        let ok = resp::parse(&mut rx)
+        let ok = resp::parse(&mut read)
             .await
             .context("reading response from first REPLCONF command")?;
 
@@ -137,11 +137,11 @@ impl State {
         eprintln!("received OK response from first REPLCONF command");
 
         Value::from_iter(["REPLCONF", "capa", "psync2"])
-            .write_to(&mut tx)
+            .write_to(&mut write)
             .await
             .context("sending second REPLCONF in handshake")?;
 
-        let ok = resp::parse(&mut rx)
+        let ok = resp::parse(&mut read)
             .await
             .context("reading response from second REPLCONF command")?;
 
@@ -149,11 +149,11 @@ impl State {
         eprintln!("received OK response from second REPLCONF command");
 
         Value::from_iter(["PSYNC", "?", "-1"])
-            .write_to(&mut tx)
+            .write_to(&mut write)
             .await
             .context("sending PSYNC in handshake")?;
 
-        let ok = resp::parse(&mut rx)
+        let ok = resp::parse(&mut read)
             .await
             .context("reading response from PSYNC command")?;
 
@@ -161,11 +161,20 @@ impl State {
         ensure!(ok.as_str().unwrap().starts_with("FULLRESYNC"));
         eprintln!("received FULLRESYNC response from PSYNC command");
 
-        let rdb_file = resp::get_rdb(&mut rx)
+        let rdb_file = resp::get_rdb(&mut read)
             .await
             .context("reading response from PSYNC command")?;
 
         dbg!(rdb_file);
+
+        drop(read);
+
+        let state = Arc::clone(&self);
+        let addr = ToSocketAddrs::to_socket_addrs(master)
+            .expect("would have failed above")
+            .next()
+            .unwrap();
+        tokio::spawn(async move { handle_connection(state, stream, addr).await.unwrap() });
 
         Ok(())
     }
@@ -182,10 +191,11 @@ async fn run_command(
     let command: Command = command.parse()?;
 
     if command.is_write() {
-        for replica in state.replicas.read().await.iter() {
-            dbg!(replica);
-            //
-        }
+        state
+            .replicas
+            .write()
+            .await
+            .retain(|replica| replica.send(command.into_command_value(args)).is_ok());
     }
 
     command.execute(state, txn, args, tx).await
@@ -193,13 +203,13 @@ async fn run_command(
 
 async fn handle_connection(
     state: Arc<State>,
-    mut stream: TcpStream,
+    stream: TcpStream,
     addr: SocketAddr,
 ) -> anyhow::Result<()> {
     println!("accepted new connection: {addr}");
 
-    let (rx, mut w) = stream.into_split();
-    let mut buf = BufReader::new(rx);
+    let (reader, mut writer) = stream.into_split();
+    let buf = BufReader::new(reader);
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
 
@@ -269,7 +279,10 @@ async fn handle_connection(
 
     while let Some(value) = rx.recv().await {
         dbg!(&value);
-        value.write_to(&mut w).await?;
+        value
+            .write_to(&mut writer)
+            .await
+            .with_context(|| format!("sending value: {value:?}"))?;
     }
 
     if !read_cmd_handle.is_finished() {
@@ -318,7 +331,7 @@ async fn main() -> anyhow::Result<()> {
     let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master), port);
     let state = Arc::new(state);
 
-    if let Role::Replica(_) = state.role {
+    if state.is_replica() {
         let state = Arc::clone(&state);
         state.do_handshake().await?;
     }
