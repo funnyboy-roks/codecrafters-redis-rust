@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Display,
-    net::{SocketAddr, ToSocketAddrs},
     sync::Arc,
 };
 
@@ -11,9 +10,7 @@ use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
-    io::{
-        AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
-    },
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, RwLock},
     time::Instant,
@@ -168,13 +165,11 @@ impl State {
             .context("reading rdb response from PSYNC command")?;
 
         let state = Arc::clone(&self);
-        let addr = ToSocketAddrs::to_socket_addrs(master)
-            .expect("would have failed above")
-            .next()
-            .unwrap();
-
-        let write = BufWriter::new(write);
-        tokio::spawn(async move { handle_connection(state, read, write, addr).await.unwrap() });
+        tokio::spawn(async move {
+            handle_connection(state, read, write, "to master".to_string())
+                .await
+                .unwrap()
+        });
 
         Ok(())
     }
@@ -205,7 +200,7 @@ async fn handle_connection<R, W>(
     state: Arc<State>,
     read: R,
     mut write: W,
-    addr: SocketAddr,
+    addr: String,
 ) -> anyhow::Result<()>
 where
     R: AsyncBufRead + Unpin + Send + 'static,
@@ -272,7 +267,6 @@ where
                 run_command(&state, &mut txn, &full_command, &tx).await?
             };
 
-            dbg!(&ret);
             if !state.is_replica() {
                 tx.send(ret)
                     .with_context(|| format!("responding to {:?} command", full_command.first()))?;
@@ -282,12 +276,17 @@ where
     let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx));
 
     while let Some(value) = rx.recv().await {
-        dbg!(&value);
+        eprintln!(
+            "[{}:{}:{}] sending value = {:?}",
+            file!(),
+            line!(),
+            column!(),
+            &value
+        );
         value
             .write_to(&mut write)
             .await
             .with_context(|| format!("sending value: {value:?}"))?;
-        write.flush().await.context("flushing writer")?;
     }
 
     if !read_cmd_handle.is_finished() {
@@ -353,7 +352,7 @@ async fn main() -> anyhow::Result<()> {
             let (read, write) = stream.into_split();
             let read = BufReader::new(read);
             let write = BufWriter::new(write);
-            match handle_connection(state, read, write, addr).await {
+            match handle_connection(state, read, write, format!("from {addr}")).await {
                 Ok(()) => {}
                 Err(err) => eprintln!("Error handling connection: {err:?}"),
             }
