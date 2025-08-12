@@ -22,13 +22,16 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
 }
 
 pub async fn replconf(state: &State, args: &[String]) -> anyhow::Result<Value> {
-    let [field, ..] = args else {
+    let [field, args @ ..] = args else {
         bail!("TODO: args.len() < 1");
     };
 
     let ret = match &**field {
-        "listening-port" | "field" => Value::simple_string("OK"),
-        "getack" => Value::from_iter(["replconf", "ack", &state.replication_offset.to_string()]),
+        "listening-port" | "capa" => Value::simple_string("OK"),
+        "getack" => {
+            ensure!(args[0] == "*", "args[0] == '{}'", args[0]);
+            Value::from_iter(["REPLCONF", "ACK", &state.replication_offset.to_string()])
+        }
         _ => bail!("Field '{field}' is not supported."),
     };
 
