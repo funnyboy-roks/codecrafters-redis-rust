@@ -69,6 +69,7 @@ pub struct State {
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
     role: Role,
+    master_tx: RwLock<Option<mpsc::UnboundedSender<Value>>>
     replication_id: String,
     replication_offset: u64,
     listening_port: u16,
@@ -82,6 +83,7 @@ impl State {
             waiting_on_list: Default::default(),
             waiting_on_stream: Default::default(),
             role,
+            master_tx: Default::default(),
             replication_id: rand::rng()
                 .sample_iter(Alphanumeric)
                 .take(40)
@@ -273,6 +275,11 @@ where
             }
         }
     }
+
+    if state.is_replica() {
+        *state.master_tx.write().await = Some(tx.clone());
+    }
+
     let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx));
 
     while let Some(value) = rx.recv().await {
