@@ -251,10 +251,6 @@ where
                 .context("parsing command")
                 .unwrap();
 
-            if is_master {
-                state.replication_offset.fetch_add(bytes, Ordering::SeqCst);
-            }
-
             let full_command: Vec<String> =
                 serde_json::from_value(value).context("parsing command")?;
 
@@ -294,6 +290,10 @@ where
             } else {
                 run_command(&state, &mut txn, &full_command, &tx, is_master).await?
             };
+
+            if is_master {
+                state.replication_offset.fetch_add(bytes, Ordering::SeqCst);
+            }
 
             if let Some(ret) = ret {
                 tx.send(ret)
