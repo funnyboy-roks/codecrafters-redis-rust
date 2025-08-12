@@ -136,6 +136,32 @@ impl Command {
         }
     }
 
+    pub const fn send_response(self) -> bool {
+        match self {
+            Command::ReplConf => true,
+            Command::Ping
+            | Command::Echo
+            | Command::Set
+            | Command::Get
+            | Command::RPush
+            | Command::LPush
+            | Command::LRange
+            | Command::LLen
+            | Command::LPop
+            | Command::BLPop
+            | Command::Type
+            | Command::XAdd
+            | Command::XRange
+            | Command::XRead
+            | Command::Incr
+            | Command::Multi
+            | Command::Exec
+            | Command::Discard
+            | Command::Info
+            | Command::PSync => false,
+        }
+    }
+
     pub fn into_command_value(self, args: &[String]) -> Value {
         std::iter::once(Value::from(self))
             .chain(args.iter().map(Value::from))

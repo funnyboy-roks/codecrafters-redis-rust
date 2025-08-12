@@ -182,7 +182,7 @@ async fn run_command(
     txn: &mut Option<Vec<Vec<String>>>,
     command: &[String],
     tx: &mpsc::UnboundedSender<Value>,
-) -> anyhow::Result<Value> {
+) -> anyhow::Result<Option<Value>> {
     let (command, args) = command.split_first().expect("command length >= 1");
 
     let command: Command = command.parse()?;
@@ -195,7 +195,21 @@ async fn run_command(
             .retain(|replica| replica.send(command.into_command_value(args)).is_ok());
     }
 
-    command.execute(state, txn, args, tx).await
+    let ret = command.execute(state, txn, args, tx).await?;
+
+    if !(state.is_replica()
+        && state
+            .master_tx
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|mtx| mtx.same_channel(tx)))
+        || command.send_response()
+    {
+        Ok(Some(ret))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn handle_connection<R, W>(
@@ -253,23 +267,23 @@ where
                     let mut ret = Vec::with_capacity(txn_inner.len());
                     for cmd in txn_inner {
                         let mut new_txn = None;
-                        ret.push(run_command(&state, &mut new_txn, cmd, &tx).await?);
+                        ret.push(run_command(&state, &mut new_txn, cmd, &tx).await?.unwrap()); // TODO: don't unwrap
                         assert!(new_txn.is_none());
                     }
                     txn = None;
-                    ret.into()
+                    Some(Value::from(ret))
                 } else if command.eq_ignore_ascii_case("discard") {
                     txn = None;
-                    Value::simple_string("OK")
+                    Some(Value::simple_string("OK"))
                 } else {
                     txn_inner.push(full_command.clone());
-                    Value::simple_string("QUEUED")
+                    Some(Value::simple_string("QUEUED"))
                 }
             } else {
                 run_command(&state, &mut txn, &full_command, &tx).await?
             };
 
-            if !state.is_replica() {
+            if let Some(ret) = ret {
                 tx.send(ret)
                     .with_context(|| format!("responding to {:?} command", full_command.first()))?;
             }

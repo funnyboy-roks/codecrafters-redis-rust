@@ -24,7 +24,7 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
 pub async fn replconf(
     state: &State,
     args: &[String],
-    tx: &mpsc::UnboundedSender<Value>,
+    _tx: &mpsc::UnboundedSender<Value>,
 ) -> anyhow::Result<Value> {
     let [field, args @ ..] = args else {
         bail!("TODO: args.len() < 1");
@@ -34,12 +34,7 @@ pub async fn replconf(
         "listening-port" | "capa" => Value::simple_string("OK"),
         "getack" => {
             ensure!(args[0] == "*", "args[0] == '{}'", args[0]);
-            tx.send(Value::from_iter([
-                "REPLCONF",
-                "ACK",
-                &state.replication_offset.to_string(),
-            ]))?;
-            Value::Null
+            Value::from_iter(["REPLCONF", "ACK", &state.replication_offset.to_string()])
         }
         _ => bail!("Field '{field}' is not supported."),
     };
