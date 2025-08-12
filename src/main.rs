@@ -69,7 +69,7 @@ pub struct State {
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
     role: Role,
-    master_tx: RwLock<Option<mpsc::UnboundedSender<Value>>>
+    master_tx: RwLock<Option<mpsc::UnboundedSender<Value>>>,
     replication_id: String,
     replication_offset: u64,
     listening_port: u16,
