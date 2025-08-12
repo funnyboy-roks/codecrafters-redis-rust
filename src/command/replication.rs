@@ -30,7 +30,7 @@ pub async fn replconf(
         bail!("TODO: args.len() < 1");
     };
 
-    let ret = match &**field {
+    let ret = match &*field.to_lowercase() {
         "listening-port" | "capa" => Value::simple_string("OK"),
         "getack" => {
             ensure!(args[0] == "*", "args[0] == '{}'", args[0]);
