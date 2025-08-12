@@ -168,7 +168,7 @@ impl State {
 
         let state = Arc::clone(&self);
         tokio::spawn(async move {
-            handle_connection(state, read, write, "to master".to_string())
+            handle_connection(state, read, write, "to master".to_string(), true)
                 .await
                 .unwrap()
         });
@@ -182,18 +182,11 @@ async fn run_command(
     txn: &mut Option<Vec<Vec<String>>>,
     command: &[String],
     tx: &mpsc::UnboundedSender<Value>,
+    is_master: bool,
 ) -> anyhow::Result<Option<Value>> {
     let (command, args) = command.split_first().expect("command length >= 1");
 
     let command: Command = command.parse()?;
-    eprintln!(
-        "[{}:{}:{}] command = {:?}, args = {:?}",
-        file!(),
-        line!(),
-        column!(),
-        &command,
-        &args
-    );
 
     if command.is_write() {
         state
@@ -205,22 +198,13 @@ async fn run_command(
 
     let ret = command.execute(state, txn, args, tx).await?;
 
-    eprintln!("[{}:{}:{}] ret = {:?}", file!(), line!(), column!(), &ret);
-
     if command.send_response() {
         eprintln!("send_response is true");
         return Ok(Some(ret));
     }
 
-    if state.is_replica()
-        && state
-            .master_tx
-            .read()
-            .await
-            .as_ref()
-            .is_some_and(|mtx| mtx.same_channel(tx))
-    {
-        eprintln!("replicating on master");
+    if state.is_replica() && is_master {
+        eprintln!("skipping response on master");
         return Ok(None);
     }
 
@@ -232,6 +216,7 @@ async fn handle_connection<R, W>(
     read: R,
     mut write: W,
     addr: String,
+    is_master: bool,
 ) -> anyhow::Result<()>
 where
     R: AsyncBufRead + Unpin + Send + 'static,
@@ -245,6 +230,7 @@ where
         mut r: R,
         state: Arc<State>,
         tx: mpsc::UnboundedSender<Value>,
+        is_master: bool,
     ) -> anyhow::Result<()>
     where
         R: AsyncRead + AsyncBufRead + Unpin,
@@ -282,7 +268,11 @@ where
                     let mut ret = Vec::with_capacity(txn_inner.len());
                     for cmd in txn_inner {
                         let mut new_txn = None;
-                        ret.push(run_command(&state, &mut new_txn, cmd, &tx).await?.unwrap()); // TODO: don't unwrap
+                        ret.push(
+                            run_command(&state, &mut new_txn, cmd, &tx, is_master)
+                                .await?
+                                .unwrap(),
+                        ); // TODO: don't unwrap
                         assert!(new_txn.is_none());
                     }
                     txn = None;
@@ -295,7 +285,7 @@ where
                     Some(Value::simple_string("QUEUED"))
                 }
             } else {
-                run_command(&state, &mut txn, &full_command, &tx).await?
+                run_command(&state, &mut txn, &full_command, &tx, is_master).await?
             };
 
             if let Some(ret) = ret {
@@ -309,7 +299,7 @@ where
         *state.master_tx.write().await = Some(tx.clone());
     }
 
-    let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx));
+    let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx, is_master));
 
     while let Some(value) = rx.recv().await {
         eprintln!(
@@ -387,7 +377,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             let (read, write) = stream.into_split();
             let read = BufReader::new(read);
-            match handle_connection(state, read, write, format!("from {addr}")).await {
+            match handle_connection(state, read, write, format!("from {addr}"), false).await {
                 Ok(()) => {}
                 Err(err) => eprintln!("Error handling connection: {err:?}"),
             }
