@@ -60,5 +60,8 @@ pub async fn psync(
     )))
     .context("Sending FULLSYNC response")?;
 
-    Ok(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))
+    tx.send(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))
+        .context("Sending FULLSYNC rdb response")?;
+
+    Ok(Value::from_iter(["replconf", "getack", "*"]))
 }

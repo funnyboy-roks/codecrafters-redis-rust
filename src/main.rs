@@ -11,7 +11,9 @@ use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, BufReader},
+    io::{
+        AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
+    },
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, RwLock},
     time::Instant,
@@ -103,8 +105,8 @@ impl State {
             panic!("this redis server is not a replica!");
         };
 
-        let mut stream = TcpStream::connect(master).await?;
-        let (read, mut write) = stream.split();
+        let stream = TcpStream::connect(master).await?;
+        let (read, mut write) = stream.into_split();
         let mut read = BufReader::new(read);
 
         // PING command
@@ -161,20 +163,18 @@ impl State {
         ensure!(ok.as_str().unwrap().starts_with("FULLRESYNC"));
         eprintln!("received FULLRESYNC response from PSYNC command");
 
-        let rdb_file = resp::get_rdb(&mut read)
+        let _rdb = resp::get_rdb(&mut read)
             .await
-            .context("reading response from PSYNC command")?;
-
-        dbg!(rdb_file);
-
-        drop(read);
+            .context("reading rdb response from PSYNC command")?;
 
         let state = Arc::clone(&self);
         let addr = ToSocketAddrs::to_socket_addrs(master)
             .expect("would have failed above")
             .next()
             .unwrap();
-        tokio::spawn(async move { handle_connection(state, stream, addr).await.unwrap() });
+
+        let write = BufWriter::new(write);
+        tokio::spawn(async move { handle_connection(state, read, write, addr).await.unwrap() });
 
         Ok(())
     }
@@ -201,15 +201,17 @@ async fn run_command(
     command.execute(state, txn, args, tx).await
 }
 
-async fn handle_connection(
+async fn handle_connection<R, W>(
     state: Arc<State>,
-    stream: TcpStream,
+    read: R,
+    mut write: W,
     addr: SocketAddr,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    R: AsyncBufRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin,
+{
     println!("accepted new connection: {addr}");
-
-    let (reader, mut writer) = stream.into_split();
-    let buf = BufReader::new(reader);
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
 
@@ -275,14 +277,15 @@ async fn handle_connection(
                 .with_context(|| format!("responding to {:?} command", full_command.first()))?;
         }
     }
-    let read_cmd_handle = tokio::spawn(read_commands(buf, Arc::clone(&state), tx));
+    let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx));
 
     while let Some(value) = rx.recv().await {
         dbg!(&value);
         value
-            .write_to(&mut writer)
+            .write_to(&mut write)
             .await
             .with_context(|| format!("sending value: {value:?}"))?;
+        write.flush().await.context("flushing writer")?;
     }
 
     if !read_cmd_handle.is_finished() {
@@ -345,7 +348,10 @@ async fn main() -> anyhow::Result<()> {
         let (stream, addr) = listener.accept().await?;
         let state = Arc::clone(&state);
         tokio::spawn(async move {
-            match handle_connection(state, stream, addr).await {
+            let (read, write) = stream.into_split();
+            let read = BufReader::new(read);
+            let write = BufWriter::new(write);
+            match handle_connection(state, read, write, addr).await {
                 Ok(()) => {}
                 Err(err) => eprintln!("Error handling connection: {err:?}"),
             }
