@@ -55,22 +55,24 @@ impl TryFrom<u8> for DataKind {
 
 /// Take all the bytes, up to the \r\n and append them to `buf`.  Reads out the \r\n from the
 /// reader
-async fn take_until_delim<R>(r: &mut R, buf: &mut Vec<u8>) -> anyhow::Result<()>
+async fn take_until_delim<R>(r: &mut R, buf: &mut Vec<u8>) -> anyhow::Result<usize>
 where
     R: AsyncBufRead + Unpin,
 {
-    r.read_until(b'\r', buf).await?;
+    let mut bytes = 0;
+    bytes += r.read_until(b'\r', buf).await?;
     if r.read_u8().await? != b'\n' {
         bail!("Expected '\\r\\n'");
     };
+    bytes += 1;
 
     buf.pop().unwrap();
-    Ok(())
+    Ok(bytes)
 }
 
 /// Take all the bytes, up to the \r\n and append them to `buf`.  Reads out the \r\n from the
 /// reader
-async fn take_delim<R>(r: &mut R) -> anyhow::Result<()>
+async fn take_delim<R>(r: &mut R) -> anyhow::Result<usize>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -78,7 +80,7 @@ where
     r.read_exact(&mut buf).await.context("reading delim")?;
 
     ensure!(buf == *b"\r\n", "Expected buf to be '\\r\\n', got {buf:?}");
-    Ok(())
+    Ok(buf.len())
 }
 
 pub async fn get_rdb<R>(r: &mut R) -> anyhow::Result<Vec<u8>>
@@ -109,17 +111,19 @@ where
     Ok(buf)
 }
 
-pub async fn parse<R>(r: &mut R) -> anyhow::Result<serde_json::Value>
+pub async fn parse<R>(r: &mut R) -> anyhow::Result<(serde_json::Value, usize)>
 where
     R: AsyncBufRead + Unpin,
 {
+    let mut bytes = 0;
     let kind = r.read_u8().await?;
+    bytes += 1;
     let kind = DataKind::try_from(kind)?;
 
     let mut buf = Vec::new();
     let value = match kind {
         DataKind::SimpleString => {
-            take_until_delim(r, &mut buf).await?;
+            bytes += take_until_delim(r, &mut buf).await?;
             serde_json::Value::from(
                 String::from_utf8(buf).context("invalid utf-8 in simple string")?,
             )
@@ -127,7 +131,7 @@ where
         DataKind::SimpleError => todo!(),
         DataKind::Integer => todo!(),
         DataKind::BulkString => {
-            take_until_delim(r, &mut buf).await?;
+            bytes += take_until_delim(r, &mut buf).await?;
 
             let len: usize = String::from_utf8(std::mem::take(&mut buf))
                 .context("invalid utf-8 string")?
@@ -136,9 +140,9 @@ where
 
             buf.resize(len, 0);
 
-            r.read_exact(&mut buf).await?;
+            bytes += r.read_exact(&mut buf).await?;
 
-            take_delim(r).await?;
+            bytes += take_delim(r).await?;
 
             // TODO: Confirm that this is a valid assumtion
             let data = String::from_utf8(buf).context("invalid utf-8 string")?;
@@ -146,7 +150,7 @@ where
             serde_json::Value::String(data)
         }
         DataKind::Array => {
-            take_until_delim(r, &mut buf).await?;
+            bytes += take_until_delim(r, &mut buf).await?;
 
             let len: usize = String::from_utf8(buf)
                 .context("invalid utf-8 string")?
@@ -156,9 +160,10 @@ where
             let mut array = Vec::with_capacity(len);
 
             for i in 0..len {
-                let value = Box::pin(parse(r))
+                let (value, num_bytes) = Box::pin(parse(r))
                     .await
                     .with_context(|| format!("parsing value at index {i} in array"))?;
+                bytes += num_bytes;
                 array.push(value);
             }
 
@@ -175,7 +180,7 @@ where
         DataKind::Push => todo!(),
     };
 
-    Ok(value)
+    Ok((value, bytes))
 }
 
 #[derive(Clone, Debug)]

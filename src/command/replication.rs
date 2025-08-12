@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{fmt::Write, sync::atomic::Ordering};
 
 use anyhow::{bail, ensure, Context};
 use tokio::sync::mpsc;
@@ -16,8 +16,12 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let mut s = String::new();
     writeln!(s, "role:{}", state.role).expect("write to string does not fail");
     writeln!(s, "master_replid:{}", state.replication_id).expect("write to string does not fail");
-    writeln!(s, "master_repl_offset:{}", state.replication_offset)
-        .expect("write to string does not fail");
+    writeln!(
+        s,
+        "master_repl_offset:{}",
+        state.replication_offset.load(Ordering::SeqCst)
+    )
+    .expect("write to string does not fail");
     Ok(Value::from(s))
 }
 
@@ -34,7 +38,11 @@ pub async fn replconf(
         "listening-port" | "capa" => Value::simple_string("OK"),
         "getack" => {
             ensure!(args[0] == "*", "args[0] == '{}'", args[0]);
-            Value::from_iter(["REPLCONF", "ACK", &state.replication_offset.to_string()])
+            Value::from_iter([
+                "REPLCONF",
+                "ACK",
+                &state.replication_offset.load(Ordering::SeqCst).to_string(),
+            ])
         }
         _ => bail!("Field '{field}' is not supported."),
     };
@@ -60,7 +68,8 @@ pub async fn psync(
 
     tx.send(Value::simple_string(format!(
         "FULLRESYNC {} {}",
-        state.replication_id, state.replication_offset
+        state.replication_id,
+        state.replication_offset.load(Ordering::SeqCst)
     )))
     .context("Sending FULLSYNC response")?;
 

@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Display,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{bail, ensure, Context};
@@ -71,7 +74,7 @@ pub struct State {
     role: Role,
     master_tx: RwLock<Option<mpsc::UnboundedSender<Value>>>,
     replication_id: String,
-    replication_offset: u64,
+    replication_offset: AtomicUsize,
     listening_port: u16,
     replicas: RwLock<Vec<mpsc::UnboundedSender<Value>>>,
 }
@@ -89,7 +92,7 @@ impl State {
                 .take(40)
                 .map(char::from)
                 .collect(),
-            replication_offset: 0,
+            replication_offset: Default::default(),
             listening_port,
             replicas: Default::default(),
         }
@@ -114,7 +117,7 @@ impl State {
             .await
             .context("sending PING in handshake")?;
 
-        let pong = resp::parse(&mut read)
+        let (pong, _) = resp::parse(&mut read)
             .await
             .context("reading response to PING command")?;
 
@@ -130,7 +133,7 @@ impl State {
         .await
         .context("sending first REPLCONF in handshake")?;
 
-        let ok = resp::parse(&mut read)
+        let (ok, _) = resp::parse(&mut read)
             .await
             .context("reading response from first REPLCONF command")?;
 
@@ -142,7 +145,7 @@ impl State {
             .await
             .context("sending second REPLCONF in handshake")?;
 
-        let ok = resp::parse(&mut read)
+        let (ok, _) = resp::parse(&mut read)
             .await
             .context("reading response from second REPLCONF command")?;
 
@@ -154,7 +157,7 @@ impl State {
             .await
             .context("sending PSYNC in handshake")?;
 
-        let ok = resp::parse(&mut read)
+        let (ok, _) = resp::parse(&mut read)
             .await
             .context("reading response from PSYNC command")?;
 
@@ -243,10 +246,14 @@ where
                 return Ok(());
             }
 
-            let value = resp::parse(&mut r)
+            let (value, bytes) = resp::parse(&mut r)
                 .await
                 .context("parsing command")
                 .unwrap();
+
+            if is_master {
+                state.replication_offset.fetch_add(bytes, Ordering::SeqCst);
+            }
 
             let full_command: Vec<String> =
                 serde_json::from_value(value).context("parsing command")?;
