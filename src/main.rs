@@ -197,19 +197,32 @@ async fn run_command(
 
     let ret = command.execute(state, txn, args, tx).await?;
 
-    if !(state.is_replica()
+    eprintln!(
+        "[{}:{}:{}]  ret              = {:?}",
+        file!(),
+        line!(),
+        column!(),
+        &ret
+    );
+
+    if command.send_response() {
+        eprintln!("send_response is true");
+        return Ok(Some(ret));
+    }
+
+    if state.is_replica()
         && state
             .master_tx
             .read()
             .await
             .as_ref()
-            .is_some_and(|mtx| mtx.same_channel(tx)))
-        || command.send_response()
+            .is_some_and(|mtx| mtx.same_channel(tx))
     {
-        Ok(Some(ret))
-    } else {
-        Ok(None)
+        eprintln!("replicating on master");
+        return Ok(None);
     }
+
+    Ok(Some(ret))
 }
 
 async fn handle_connection<R, W>(
