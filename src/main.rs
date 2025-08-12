@@ -10,7 +10,7 @@ use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader, BufWriter},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, RwLock},
     time::Instant,
@@ -237,7 +237,7 @@ where
                 serde_json::from_value(value).context("parsing command")?;
 
             eprintln!(
-                "[{}:{}:{}] command = {:?}",
+                "[{}:{}:{}] received command = {:?}",
                 file!(),
                 line!(),
                 column!(),
@@ -284,7 +284,7 @@ where
 
     while let Some(value) = rx.recv().await {
         eprintln!(
-            "[{}:{}:{}] sending value = {:?}",
+            "[{}:{}:{}] sending value    = {:?}",
             file!(),
             line!(),
             column!(),
@@ -358,7 +358,6 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             let (read, write) = stream.into_split();
             let read = BufReader::new(read);
-            let write = BufWriter::new(write);
             match handle_connection(state, read, write, format!("from {addr}")).await {
                 Ok(()) => {}
                 Err(err) => eprintln!("Error handling connection: {err:?}"),
