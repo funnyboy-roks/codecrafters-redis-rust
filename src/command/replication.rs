@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use anyhow::{bail, ensure, Context};
-use tokio::io::AsyncWrite;
+use tokio::sync::mpsc;
 
 use crate::{resp::Value, State};
 
@@ -32,10 +32,11 @@ pub async fn replconf(_state: &State, args: &[String]) -> anyhow::Result<Value> 
     Ok(Value::simple_string("OK"))
 }
 
-pub async fn psync<W>(state: &State, args: &[String], tx: &mut W) -> anyhow::Result<Value>
-where
-    W: AsyncWrite + Unpin,
-{
+pub async fn psync(
+    state: &State,
+    args: &[String],
+    tx: &mpsc::UnboundedSender<Value>,
+) -> anyhow::Result<Value> {
     let [replication_id, replication_offset] = args else {
         bail!("TODO: args.len() != 2");
     };
@@ -45,12 +46,12 @@ where
         "Replication id is not '?', got {replication_id} OR Replication offset is not '-1', got {replication_offset}"
     );
 
-    Value::simple_string(format!(
+    state.replicas.write().await.push(tx.clone());
+
+    tx.send(Value::simple_string(format!(
         "FULLRESYNC {} {}",
         state.replication_id, state.replication_offset
-    ))
-    .write_to(tx)
-    .await
+    )))
     .context("Sending FULLSYNC response")?;
 
     Ok(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))

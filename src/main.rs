@@ -6,13 +6,14 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Context};
+use command::Command;
 use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWrite, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, BufReader},
     net::{TcpListener, TcpStream},
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, RwLock},
     time::Instant,
 };
 
@@ -72,6 +73,7 @@ pub struct State {
     replication_id: String,
     replication_offset: u64,
     listening_port: u16,
+    replicas: RwLock<Vec<mpsc::UnboundedSender<Value>>>,
 }
 
 impl State {
@@ -88,7 +90,12 @@ impl State {
                 .collect(),
             replication_offset: 0,
             listening_port,
+            replicas: Default::default(),
         }
+    }
+
+    pub fn is_replica(&self) -> bool {
+        matches!(self.role, Role::Replica(_))
     }
 
     async fn do_handshake(self: Arc<Self>) -> anyhow::Result<()> {
@@ -164,53 +171,24 @@ impl State {
     }
 }
 
-async fn run_command<W>(
+async fn run_command(
     state: &State,
     txn: &mut Option<Vec<Vec<String>>>,
     command: &[String],
-    tx: &mut W,
-) -> anyhow::Result<Value>
-where
-    W: AsyncWrite + Unpin,
-{
+    tx: &mpsc::UnboundedSender<Value>,
+) -> anyhow::Result<Value> {
     let (command, args) = command.split_first().expect("command length >= 1");
 
-    let ret = match &*command.to_lowercase() {
-        "ping" => Value::simple_string("PONG"),
-        "echo" => Value::bulk_string(&args[0]),
-        "set" => command::set(state, args).await?,
-        "get" => command::get(state, args).await?,
+    let command: Command = command.parse()?;
 
-        "rpush" => command::list::rpush(state, args).await?,
-        "lpush" => command::list::lpush(state, args).await?,
-        "lrange" => command::list::lrange(state, args).await?,
-        "llen" => command::list::llen(state, args).await?,
-        "lpop" => command::list::lpop(state, args).await?,
-        "blpop" => command::list::blpop(state, args).await?,
-
-        "type" => command::stream::ty(state, args).await?,
-        "xadd" => command::stream::xadd(state, args).await?,
-        "xrange" => command::stream::xrange(state, args).await?,
-        "xread" => command::stream::xread(state, args).await?,
-
-        "incr" => command::transaction::incr(state, args).await?,
-        "multi" => {
-            *txn = Some(Vec::new());
-            Value::simple_string("OK")
+    if command.is_write() {
+        for replica in state.replicas.read().await.iter() {
+            dbg!(replica);
+            //
         }
-        "exec" => Value::simple_error("ERR EXEC without MULTI"),
-        "discard" => Value::simple_error("ERR DISCARD without MULTI"),
+    }
 
-        "info" => command::replication::info(state, args).await?,
-        "replconf" => command::replication::replconf(state, args).await?,
-        "psync" => command::replication::psync(state, args, tx).await?,
-
-        _ => {
-            bail!("unknown command: {command:?}");
-        }
-    };
-
-    Ok(ret)
+    command.execute(state, txn, args, tx).await
 }
 
 async fn handle_connection(
@@ -220,56 +198,83 @@ async fn handle_connection(
 ) -> anyhow::Result<()> {
     println!("accepted new connection: {addr}");
 
-    let (rx, mut tx) = stream.split();
+    let (rx, mut w) = stream.into_split();
     let mut buf = BufReader::new(rx);
 
-    let mut txn: Option<Vec<Vec<String>>> = None;
-    loop {
-        let filled = buf.fill_buf().await?;
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
 
-        if filled.is_empty() {
-            break;
-        }
+    async fn read_commands<R>(
+        mut r: R,
+        state: Arc<State>,
+        tx: mpsc::UnboundedSender<Value>,
+    ) -> anyhow::Result<()>
+    where
+        R: AsyncRead + AsyncBufRead + Unpin,
+    {
+        let mut txn: Option<Vec<Vec<String>>> = None;
+        loop {
+            let filled = r.fill_buf().await.context("filling buf").unwrap();
 
-        let value = resp::parse(&mut buf).await.context("parsing value")?;
-        let full_command: Vec<String> = serde_json::from_value(value).context("parsing command")?;
-
-        eprintln!(
-            "[{}:{}:{}] command = {:?}",
-            file!(),
-            line!(),
-            column!(),
-            &full_command
-        );
-
-        // TODO: handle error
-        assert!(!full_command.is_empty());
-
-        let ret = if let Some(ref mut txn_inner) = txn {
-            let command = full_command.first().expect("command length >= 1");
-            if command.eq_ignore_ascii_case("exec") {
-                let mut ret = Vec::with_capacity(txn_inner.len());
-                for cmd in txn_inner {
-                    let mut new_txn = None;
-                    ret.push(run_command(&state, &mut new_txn, cmd, &mut tx).await?);
-                    assert!(new_txn.is_none());
-                }
-                txn = None;
-                ret.into()
-            } else if command.eq_ignore_ascii_case("discard") {
-                txn = None;
-                Value::simple_string("OK")
-            } else {
-                txn_inner.push(full_command.clone());
-                Value::simple_string("QUEUED")
+            if filled.is_empty() {
+                return Ok(());
             }
-        } else {
-            run_command(&state, &mut txn, &full_command, &mut tx).await?
-        };
 
-        ret.write_to(&mut tx)
-            .await
-            .with_context(|| format!("responding to {:?} command", full_command.first()))?;
+            let value = resp::parse(&mut r)
+                .await
+                .context("parsing command")
+                .unwrap();
+
+            let full_command: Vec<String> =
+                serde_json::from_value(value).context("parsing command")?;
+
+            eprintln!(
+                "[{}:{}:{}] command = {:?}",
+                file!(),
+                line!(),
+                column!(),
+                &full_command
+            );
+
+            // TODO: handle error
+            assert!(!full_command.is_empty());
+
+            let ret = if let Some(ref mut txn_inner) = txn {
+                let command = full_command.first().expect("command length >= 1");
+                if command.eq_ignore_ascii_case("exec") {
+                    let mut ret = Vec::with_capacity(txn_inner.len());
+                    for cmd in txn_inner {
+                        let mut new_txn = None;
+                        ret.push(run_command(&state, &mut new_txn, cmd, &tx).await?);
+                        assert!(new_txn.is_none());
+                    }
+                    txn = None;
+                    ret.into()
+                } else if command.eq_ignore_ascii_case("discard") {
+                    txn = None;
+                    Value::simple_string("OK")
+                } else {
+                    txn_inner.push(full_command.clone());
+                    Value::simple_string("QUEUED")
+                }
+            } else {
+                run_command(&state, &mut txn, &full_command, &tx).await?
+            };
+
+            dbg!(&ret);
+            tx.send(ret)
+                .with_context(|| format!("responding to {:?} command", full_command.first()))?;
+        }
+    }
+    let read_cmd_handle = tokio::spawn(read_commands(buf, Arc::clone(&state), tx));
+
+    while let Some(value) = rx.recv().await {
+        dbg!(&value);
+        value.write_to(&mut w).await?;
+    }
+
+    if !read_cmd_handle.is_finished() {
+        eprintln!("Waiting for 'read_cmd_handle' to be finished");
+        read_cmd_handle.await??;
     }
 
     eprintln!("Connection terminated: {addr}");
