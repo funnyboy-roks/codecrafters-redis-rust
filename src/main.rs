@@ -186,6 +186,14 @@ async fn run_command(
     let (command, args) = command.split_first().expect("command length >= 1");
 
     let command: Command = command.parse()?;
+    eprintln!(
+        "[{}:{}:{}] command = {:?}, args = {:?}",
+        file!(),
+        line!(),
+        column!(),
+        &command,
+        &args
+    );
 
     if command.is_write() {
         state
@@ -197,13 +205,7 @@ async fn run_command(
 
     let ret = command.execute(state, txn, args, tx).await?;
 
-    eprintln!(
-        "[{}:{}:{}]  ret              = {:?}",
-        file!(),
-        line!(),
-        column!(),
-        &ret
-    );
+    eprintln!("[{}:{}:{}] ret = {:?}", file!(), line!(), column!(), &ret);
 
     if command.send_response() {
         eprintln!("send_response is true");

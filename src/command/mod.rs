@@ -175,6 +175,7 @@ impl Command {
         args: &[String],
         tx: &tokio::sync::mpsc::UnboundedSender<Value>,
     ) -> anyhow::Result<Value> {
+        eprintln!("Command::execute on {self:?}");
         let ret = match self {
             Command::Ping => Value::simple_string("PONG"),
             Command::Echo => Value::bulk_string(&args[0]),
