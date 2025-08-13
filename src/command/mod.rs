@@ -40,6 +40,7 @@ pub enum Command {
     PSync,
 
     Config,
+    Keys,
 }
 
 impl FromStr for Command {
@@ -74,6 +75,7 @@ impl FromStr for Command {
             "psync" => Self::PSync,
 
             "config" => Self::Config,
+            "keys" => Self::Keys,
 
             _ => {
                 bail!("unknown command: {s:?}");
@@ -113,6 +115,7 @@ impl Command {
             Self::PSync => "PSYNC",
 
             Self::Config => "CONFIG",
+            Self::Keys => "KEYS",
         }
     }
 
@@ -132,7 +135,8 @@ impl Command {
             | Command::Info
             | Command::ReplConf
             | Command::PSync
-            | Command::Config => false,
+            | Command::Config
+            | Command::Keys => false,
 
             Command::Set
             | Command::RPush
@@ -167,7 +171,8 @@ impl Command {
             | Command::Discard
             | Command::Info
             | Command::PSync
-            | Command::Config => false,
+            | Command::Config
+            | Command::Keys => false,
         }
     }
 
@@ -216,6 +221,7 @@ impl Command {
             Command::PSync => replication::psync(state, args, tx).await?,
 
             Command::Config => persistence::config(state, args).await?,
+            Command::Keys => persistence::keys(state, args).await?,
         };
 
         Ok(ret)

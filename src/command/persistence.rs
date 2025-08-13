@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{bail, ensure};
 
 use crate::{resp::Value, State};
 
@@ -33,4 +33,13 @@ pub async fn config(state: &State, args: &[String]) -> anyhow::Result<Value> {
     };
 
     Ok(ret)
+}
+
+pub async fn keys(state: &State, args: &[String]) -> anyhow::Result<Value> {
+    let [filter] = args else {
+        bail!("TODO: args.len() != 1");
+    };
+    ensure!(filter == "*");
+
+    Ok(state.map.iter().map(|e| Value::from(e.key())).collect())
 }

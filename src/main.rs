@@ -14,6 +14,7 @@ use dashmap::DashMap;
 use rand::{distr::Alphanumeric, Rng};
 use resp::Value;
 use tokio::{
+    fs::File,
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, RwLock},
@@ -21,6 +22,7 @@ use tokio::{
 };
 
 pub mod command;
+pub mod rdb;
 pub mod resp;
 
 #[derive(Debug, Clone)]
@@ -391,12 +393,29 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let state = State::new(
+    let mut state = State::new(
         master.map(Role::Replica).unwrap_or(Role::Master),
         port,
-        dir,
-        db_filename,
+        dir.clone(),
+        db_filename.clone(),
     );
+
+    if let Some(ref dir) = dir {
+        let db_file = File::open(
+            dir.join(
+                db_filename
+                    .as_ref()
+                    .expect("dir and dbfilename should both be specified"),
+            ),
+        )
+        .await
+        .context("opening db file")?;
+        let mut db_file = BufReader::new(db_file);
+        rdb::read(&mut db_file, &mut state)
+            .await
+            .context("parsing db file")?;
+    }
+
     let state = Arc::new(state);
 
     if state.is_replica() {
