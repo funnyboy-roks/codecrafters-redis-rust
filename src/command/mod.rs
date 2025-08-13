@@ -1,7 +1,9 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::{bail, Context};
-use tokio::time::Instant;
 
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
@@ -244,7 +246,7 @@ pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Value> {
         expires_at: if args.len() > 2 && args[2].eq_ignore_ascii_case("px") {
             let ms: u64 = args[3].parse().context("parsing millis until expiration")?;
 
-            Some(Instant::now() + Duration::from_millis(ms))
+            Some(SystemTime::now() + Duration::from_millis(ms))
         } else {
             None
         },
@@ -257,8 +259,12 @@ pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Value> {
 pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Value> {
     let key = &args[0];
     let value = if let Some(value) = state.map.get(key) {
-        if value.expires_at.is_none_or(|e| Instant::now() < e) {
+        if value.expires_at.is_none_or(|e| SystemTime::now() < e) {
             eprintln!("get {key} from map -> {:?}", value.value);
+            if let Some(expires_at) = value.expires_at {
+                let expires_in = expires_at.duration_since(SystemTime::now()).unwrap();
+                eprintln!("expires in {}s", expires_in.as_secs_f64());
+            }
             match &value.value {
                 MapValueContent::Integer(n) => Value::bulk_string(n.to_string()),
                 MapValueContent::String(string) => Value::bulk_string(string.clone()),

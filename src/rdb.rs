@@ -1,10 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, ensure, Context};
-use tokio::{
-    io::{AsyncBufRead, AsyncReadExt},
-    time::Instant,
-};
+use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 use crate::{MapValueContent, State};
 
@@ -185,7 +182,7 @@ where
                             // expiry in millis
                             let timestamp =
                                 r.read_u64_le().await.context("reading timeout timestamp")?;
-                            let expire = SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp);
+                            let expire = SystemTime::UNIX_EPOCH + Duration::from_millis(timestamp);
 
                             let zero = r.read_u8().await.context("reading kv-pair flag")?;
                             ensure!(zero == 0, "kv-pair flag was not zero: 0x{zero:02x}");
@@ -212,7 +209,7 @@ where
                         key,
                         crate::MapValue {
                             value: MapValueContent::String(value),
-                            expires_at: expire.map(|_| Instant::now()),
+                            expires_at: expire,
                         },
                     );
                 }

@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::SystemTime,
 };
 
 use anyhow::{bail, ensure, Context};
@@ -18,7 +19,6 @@ use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot, RwLock},
-    time::Instant,
 };
 
 pub mod command;
@@ -46,7 +46,7 @@ impl From<&str> for MapValueContent {
 #[derive(Debug, Clone)]
 struct MapValue {
     value: MapValueContent,
-    expires_at: Option<Instant>,
+    expires_at: Option<SystemTime>,
 }
 
 struct StreamEvent {
