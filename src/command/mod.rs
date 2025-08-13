@@ -6,6 +6,7 @@ use tokio::time::Instant;
 use crate::{resp::Value, MapValue, MapValueContent, State};
 
 pub mod list;
+pub mod persistence;
 pub mod replication;
 pub mod stream;
 pub mod transaction;
@@ -37,6 +38,8 @@ pub enum Command {
     Info,
     ReplConf,
     PSync,
+
+    Config,
 }
 
 impl FromStr for Command {
@@ -69,6 +72,8 @@ impl FromStr for Command {
             "info" => Self::Info,
             "replconf" => Self::ReplConf,
             "psync" => Self::PSync,
+
+            "config" => Self::Config,
 
             _ => {
                 bail!("unknown command: {s:?}");
@@ -106,6 +111,8 @@ impl Command {
             Self::Info => "INFO",
             Self::ReplConf => "REPLCONF",
             Self::PSync => "PSYNC",
+
+            Self::Config => "CONFIG",
         }
     }
 
@@ -124,7 +131,8 @@ impl Command {
             | Command::Discard
             | Command::Info
             | Command::ReplConf
-            | Command::PSync => false,
+            | Command::PSync
+            | Command::Config => false,
 
             Command::Set
             | Command::RPush
@@ -158,7 +166,8 @@ impl Command {
             | Command::Exec
             | Command::Discard
             | Command::Info
-            | Command::PSync => false,
+            | Command::PSync
+            | Command::Config => false,
         }
     }
 
@@ -205,6 +214,8 @@ impl Command {
             Command::Info => replication::info(state, args).await?,
             Command::ReplConf => replication::replconf(state, args, tx).await?,
             Command::PSync => replication::psync(state, args, tx).await?,
+
+            Command::Config => persistence::config(state, args).await?,
         };
 
         Ok(ret)

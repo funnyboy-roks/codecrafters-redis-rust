@@ -183,7 +183,7 @@ where
     Ok((value, bytes))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[repr(u8)]
 pub enum Value {
     SimpleString(String),
@@ -191,13 +191,17 @@ pub enum Value {
     Integer(i64),
     BulkString(String),
     Rdb(Vec<u8>),
+    #[default]
     Null,
     Array(Vec<Value>),
     Boolean(bool),
     Double(f64),
     BigNumber(i128),
     BulkError(String),
-    VerbatimString { encoding: [u8; 3], data: Vec<u8> },
+    VerbatimString {
+        encoding: [u8; 3],
+        data: Vec<u8>,
+    },
     Map(HashMap<Value, Value>),
     Attribute(HashMap<Value, Value>),
     Set(HashSet<Value>),

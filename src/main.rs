@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Display,
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -72,15 +73,24 @@ pub struct State {
     waiting_on_list: DashMap<String, VecDeque<oneshot::Sender<String>>>,
     waiting_on_stream: DashMap<String, Vec<mpsc::UnboundedSender<StreamEvent>>>,
     role: Role,
+
     master_tx: RwLock<Option<mpsc::UnboundedSender<Value>>>,
     replication_id: String,
     replication_offset: AtomicUsize,
     listening_port: u16,
     replicas: RwLock<Vec<mpsc::UnboundedSender<Value>>>,
+
+    dir: Option<PathBuf>,
+    db_filename: Option<String>,
 }
 
 impl State {
-    fn new(role: Role, listening_port: u16) -> Self {
+    fn new(
+        role: Role,
+        listening_port: u16,
+        dir: Option<PathBuf>,
+        db_filename: Option<String>,
+    ) -> Self {
         Self {
             map: Default::default(),
             waiting_on_list: Default::default(),
@@ -95,6 +105,8 @@ impl State {
             replication_offset: Default::default(),
             listening_port,
             replicas: Default::default(),
+            dir,
+            db_filename,
         }
     }
 
@@ -189,7 +201,7 @@ async fn run_command(
 ) -> anyhow::Result<Option<Value>> {
     let (command, args) = command.split_first().expect("command length >= 1");
 
-    let command: Command = command.parse()?;
+    let command: Command = command.parse().context("parsing command")?;
 
     if command.is_write() {
         state
@@ -324,8 +336,8 @@ where
 
     if !read_cmd_handle.is_finished() {
         eprintln!("Waiting for 'read_cmd_handle' to be finished");
-        read_cmd_handle.await??;
     }
+    read_cmd_handle.await??;
 
     eprintln!("Connection terminated: {addr}");
 
@@ -344,6 +356,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut port = 6379;
     let mut master: Option<String> = None;
+    let mut dir: Option<PathBuf> = None;
+    let mut db_filename: Option<String> = None;
     while let Some(arg) = args.next() {
         match &*arg {
             "--port" | "-p" => {
@@ -352,7 +366,7 @@ async fn main() -> anyhow::Result<()> {
                 };
                 port = port_str.parse().context("malformed port")?;
             }
-            "--replicaof" => {
+            "--replicaof" if master.is_none() => {
                 let Some(master_str) = args.next() else {
                     print_usage();
                 };
@@ -361,11 +375,28 @@ async fn main() -> anyhow::Result<()> {
                     .context("malformed master server string")?;
                 master = Some(format!("{host}:{port}"));
             }
+            "--dir" if dir.is_none() => {
+                let Some(dir_str) = args.next() else {
+                    print_usage();
+                };
+                dir = Some(PathBuf::from(dir_str));
+            }
+            "--dbfilename" if db_filename.is_none() => {
+                let Some(name) = args.next() else {
+                    print_usage();
+                };
+                db_filename = Some(name);
+            }
             _ => bail!("Unexpected argument: {arg}"),
         }
     }
 
-    let state = State::new(master.map(Role::Replica).unwrap_or(Role::Master), port);
+    let state = State::new(
+        master.map(Role::Replica).unwrap_or(Role::Master),
+        port,
+        dir,
+        db_filename,
+    );
     let state = Arc::new(state);
 
     if state.is_replica() {
