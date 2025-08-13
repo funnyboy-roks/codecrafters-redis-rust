@@ -401,19 +401,21 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if let Some(ref dir) = dir {
-        let db_file = File::open(
-            dir.join(
-                db_filename
-                    .as_ref()
-                    .expect("dir and dbfilename should both be specified"),
-            ),
-        )
-        .await
-        .context("opening db file")?;
-        let mut db_file = BufReader::new(db_file);
-        rdb::read(&mut db_file, &mut state)
+        let path = dir.join(
+            db_filename
+                .as_ref()
+                .expect("dir and dbfilename should both be specified"),
+        );
+        if tokio::fs::try_exists(&path)
             .await
-            .context("parsing db file")?;
+            .with_context(|| format!("checking where {} exists", path.display()))?
+        {
+            let db_file = File::open(path).await.context("opening db file")?;
+            let mut db_file = BufReader::new(db_file);
+            rdb::read(&mut db_file, &mut state)
+                .await
+                .context("parsing db file")?;
+        }
     }
 
     let state = Arc::new(state);
