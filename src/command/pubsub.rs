@@ -38,13 +38,15 @@ pub async fn publish(
         bail!("TODO: args.len() != 1");
     };
 
-    dbg!(value);
+    let len = if let Some(mut listeners) = state.channel_listeners.get_mut(channel) {
+        listeners.retain(|l| {
+            l.send(Value::from_iter(["message", channel, value]))
+                .is_ok()
+        });
+        listeners.len()
+    } else {
+        0
+    };
 
-    let count = state
-        .channel_listeners
-        .get(channel)
-        .map(|v| v.len())
-        .unwrap_or_default();
-
-    Ok(Value::from(count))
+    Ok(Value::from(len))
 }
