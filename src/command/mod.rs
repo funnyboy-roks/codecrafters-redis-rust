@@ -285,7 +285,7 @@ impl Command {
                 pubsub::subscribe(state, conn_state, args).await?
             }
             (Command::Ping, ConnectionMode::Subscribed) => {
-                Value::simple_string(["pong", ""])
+                Value::from_iter(["pong", ""])
             }
 
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
