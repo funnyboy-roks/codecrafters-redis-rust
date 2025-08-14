@@ -212,7 +212,7 @@ impl Command {
         let state = Arc::clone(&conn_state.app_state);
         let ret = match (self, conn_state.mode) {
             // Intro
-            (Command::Ping, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
+            (Command::Ping, ConnectionMode::Normal) => {
                 Value::simple_string("PONG")
             }
             (Command::Echo, ConnectionMode::Normal) => Value::bulk_string(&args[0]),
@@ -283,6 +283,9 @@ impl Command {
 
             (Command::Subscribe, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
                 pubsub::subscribe(state, conn_state, args).await?
+            }
+            (Command::Ping, ConnectionMode::Subscribed) => {
+                Value::simple_string(["pong", ""])
             }
 
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
