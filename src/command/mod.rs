@@ -49,6 +49,7 @@ pub enum Command {
     Keys,
 
     Subscribe,
+    Unsubscribe,
     Publish,
 }
 
@@ -87,6 +88,7 @@ impl FromStr for Command {
             "keys" => Self::Keys,
 
             "subscribe" => Self::Subscribe,
+            "unsubscribe" => Self::Unsubscribe,
             "publish" => Self::Publish,
 
             _ => {
@@ -136,6 +138,7 @@ impl Command {
             Self::Keys => "KEYS",
 
             Self::Subscribe => "SUBSCRIBE",
+            Self::Unsubscribe => "UNSUBSCRIBE",
             Self::Publish => "PUBLISH",
         }
     }
@@ -159,6 +162,7 @@ impl Command {
             | Self::Config
             | Self::Keys
             | Self::Subscribe
+            | Self::Unsubscribe
             | Self::Publish => false,
 
             Self::Set
@@ -197,6 +201,7 @@ impl Command {
             | Self::Config
             | Self::Keys
             | Self::Subscribe
+            | Self::Unsubscribe
             | Self::Publish => false,
         }
     }
@@ -287,6 +292,9 @@ impl Command {
 
             (Command::Subscribe, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
                 pubsub::subscribe(state, conn_state, args).await?
+            }
+            (Command::Unsubscribe, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
+                pubsub::unsubscribe(state, conn_state, args).await?
             }
             (Command::Ping, ConnectionMode::Subscribed) => {
                 Value::from_iter(["pong", ""])

@@ -233,6 +233,41 @@ impl ConnectionState {
         self.tx.as_ref().unwrap()
     }
 
+    pub fn unsubscribe(&mut self, channel: &str) -> usize {
+        self.channels.remove(channel);
+        let tx = self.tx();
+        if let Some(mut channels) = self.app_state.channel_listeners.get_mut(channel) {
+            if let Some(idx) = channels
+                .iter()
+                .enumerate()
+                .find_map(|(i, c)| (!c.same_channel(tx)).then_some(i))
+            {
+                channels.swap_remove(idx);
+            }
+        }
+
+        let len = self.channels.len();
+        if len == 0 {
+            self.mode = ConnectionMode::Normal;
+        }
+        len
+    }
+
+    pub fn unsubscribe_all(&mut self) {
+        let tx = self.tx();
+        for channel in &self.channels {
+            if let Some(mut channels) = self.app_state.channel_listeners.get_mut(channel) {
+                if let Some(idx) = channels
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, c)| (!c.same_channel(tx)).then_some(i))
+                {
+                    channels.swap_remove(idx);
+                }
+            }
+        }
+    }
+
     async fn run_command(&mut self, command: &[String]) -> anyhow::Result<Option<Value>> {
         let (command, args) = command.split_first().expect("command length >= 1");
 
@@ -346,7 +381,8 @@ impl ConnectionState {
         }
 
         let addr = self.addr;
-        let read_cmd_handle = tokio::spawn(async move { self.read_commands(read).await });
+        let read_cmd_handle =
+            tokio::spawn(async move { self.read_commands(read).await.map(|_| self) });
 
         while let Some(value) = rx.recv().await {
             eprintln!(
@@ -365,7 +401,9 @@ impl ConnectionState {
         if !read_cmd_handle.is_finished() {
             eprintln!("Waiting for 'read_cmd_handle' to be finished");
         }
-        read_cmd_handle.await??;
+        let mut this = read_cmd_handle.await??;
+
+        this.unsubscribe_all();
 
         if let Some(addr) = addr {
             eprintln!("Connection terminated: {addr}");

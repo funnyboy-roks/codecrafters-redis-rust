@@ -29,6 +29,24 @@ pub async fn subscribe(
     ]))
 }
 
+pub async fn unsubscribe(
+    _: Arc<State>,
+    conn_state: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [channel] = args else {
+        bail!("TODO: args.len() != 1");
+    };
+
+    conn_state.unsubscribe(channel);
+
+    Ok(Value::from_iter([
+        Value::from("unsubscribe"),
+        Value::from(channel),
+        Value::from(conn_state.channels.len()),
+    ]))
+}
+
 pub async fn publish(
     state: Arc<State>,
     _: &mut ConnectionState,
