@@ -49,6 +49,7 @@ pub enum Command {
     Keys,
 
     Subscribe,
+    Publish,
 }
 
 impl FromStr for Command {
@@ -86,6 +87,7 @@ impl FromStr for Command {
             "keys" => Self::Keys,
 
             "subscribe" => Self::Subscribe,
+            "publish" => Self::Publish,
 
             _ => {
                 bail!("unknown command: {s:?}");
@@ -134,65 +136,68 @@ impl Command {
             Self::Keys => "KEYS",
 
             Self::Subscribe => "SUBSCRIBE",
+            Self::Publish => "PUBLISH",
         }
     }
 
     pub const fn is_write(self) -> bool {
         match self {
-            Command::Ping
-            | Command::Echo
-            | Command::Get
-            | Command::LRange
-            | Command::LLen
-            | Command::Type
-            | Command::XRange
-            | Command::XRead
-            | Command::Multi
-            | Command::Exec
-            | Command::Discard
-            | Command::Info
-            | Command::ReplConf
-            | Command::PSync
-            | Command::Config
-            | Command::Keys
-            | Command::Subscribe => false,
+            Self::Ping
+            | Self::Echo
+            | Self::Get
+            | Self::LRange
+            | Self::LLen
+            | Self::Type
+            | Self::XRange
+            | Self::XRead
+            | Self::Multi
+            | Self::Exec
+            | Self::Discard
+            | Self::Info
+            | Self::ReplConf
+            | Self::PSync
+            | Self::Config
+            | Self::Keys
+            | Self::Subscribe
+            | Self::Publish => false,
 
-            Command::Set
-            | Command::RPush
-            | Command::LPush
-            | Command::LPop
-            | Command::BLPop
-            | Command::XAdd
-            | Command::Incr => true,
+            Self::Set
+            | Self::RPush
+            | Self::LPush
+            | Self::LPop
+            | Self::BLPop
+            | Self::XAdd
+            | Self::Incr => true,
         }
     }
 
     pub const fn send_response(self) -> bool {
         match self {
-            Command::ReplConf => true,
-            Command::Ping
-            | Command::Echo
-            | Command::Set
-            | Command::Get
-            | Command::RPush
-            | Command::LPush
-            | Command::LRange
-            | Command::LLen
-            | Command::LPop
-            | Command::BLPop
-            | Command::Type
-            | Command::XAdd
-            | Command::XRange
-            | Command::XRead
-            | Command::Incr
-            | Command::Multi
-            | Command::Exec
-            | Command::Discard
-            | Command::Info
-            | Command::PSync
-            | Command::Config
-            | Command::Keys
-            | Command::Subscribe => false,
+            Self::ReplConf => true,
+            Self::Ping
+            | Self::Echo
+            | Self::Set
+            | Self::Get
+            | Self::RPush
+            | Self::LPush
+            | Self::LRange
+            | Self::LLen
+            | Self::LPop
+            | Self::BLPop
+            | Self::Type
+            | Self::XAdd
+            | Self::XRange
+            | Self::XRead
+            | Self::Incr
+            | Self::Multi
+            | Self::Exec
+            | Self::Discard
+            | Self::Info
+            | Self::PSync
+            | Self::Config
+            | Self::Keys
+            | Self::Subscribe
+            | Self::Publish => false,
         }
     }
 
@@ -206,7 +211,6 @@ impl Command {
         self,
         conn_state: &mut ConnectionState,
         args: &[String],
-        tx: &tokio::sync::mpsc::UnboundedSender<Value>,
     ) -> anyhow::Result<Value> {
         eprintln!("Command::execute on {self:?}");
         let state = Arc::clone(&conn_state.app_state);
@@ -267,10 +271,10 @@ impl Command {
                 replication::info(state, conn_state, args).await?
             }
             (Command::ReplConf, ConnectionMode::Normal) => {
-                replication::replconf(state, conn_state, args, tx).await?
+                replication::replconf(state, conn_state, args).await?
             }
             (Command::PSync, ConnectionMode::Normal) => {
-                replication::psync(state, conn_state, args, tx).await?
+                replication::psync(state, conn_state, args).await?
             }
 
             // RDB Persistence
@@ -286,6 +290,9 @@ impl Command {
             }
             (Command::Ping, ConnectionMode::Subscribed) => {
                 Value::from_iter(["pong", ""])
+            }
+            (Command::Publish, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
+                pubsub::publish(state, conn_state, args).await?
             }
 
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))

@@ -83,6 +83,8 @@ pub struct State {
     listening_port: u16,
     replicas: RwLock<Vec<mpsc::UnboundedSender<Value>>>,
 
+    channel_listeners: DashMap<String, Vec<mpsc::UnboundedSender<Value>>>,
+
     dir: Option<PathBuf>,
     db_filename: Option<String>,
 }
@@ -108,6 +110,7 @@ impl State {
             replication_offset: Default::default(),
             listening_port,
             replicas: Default::default(),
+            channel_listeners: Default::default(),
             dir,
             db_filename,
         }
@@ -206,6 +209,7 @@ pub struct ConnectionState {
     channels: HashSet<String>,
     app_state: Arc<State>,
     mode: ConnectionMode,
+    tx: Option<mpsc::UnboundedSender<Value>>,
 }
 
 impl ConnectionState {
@@ -216,18 +220,20 @@ impl ConnectionState {
             channels: Default::default(),
             app_state,
             mode: Default::default(),
+            tx: None,
         }
     }
 
-    fn is_master(&self) -> bool {
+    pub fn is_master(&self) -> bool {
         self.addr.is_none()
     }
 
-    async fn run_command(
-        &mut self,
-        command: &[String],
-        tx: &mpsc::UnboundedSender<Value>,
-    ) -> anyhow::Result<Option<Value>> {
+    pub fn tx(&self) -> &mpsc::UnboundedSender<Value> {
+        // TODO: this unwrap hurts me
+        self.tx.as_ref().unwrap()
+    }
+
+    async fn run_command(&mut self, command: &[String]) -> anyhow::Result<Option<Value>> {
         let (command, args) = command.split_first().expect("command length >= 1");
 
         let command: Command = command.parse().context("parsing command")?;
@@ -240,7 +246,7 @@ impl ConnectionState {
                 .retain(|replica| replica.send(command.into_command_value(args)).is_ok());
         }
 
-        let ret = command.execute(self, args, tx).await?;
+        let ret = command.execute(self, args).await?;
 
         if command.send_response() {
             eprintln!("send_response is true");
@@ -255,11 +261,7 @@ impl ConnectionState {
         Ok(Some(ret))
     }
 
-    async fn read_commands<R>(
-        &mut self,
-        mut r: R,
-        tx: mpsc::UnboundedSender<Value>,
-    ) -> anyhow::Result<()>
+    async fn read_commands<R>(&mut self, mut r: R) -> anyhow::Result<()>
     where
         R: AsyncRead + AsyncBufRead + Unpin,
     {
@@ -296,7 +298,7 @@ impl ConnectionState {
                     let txn_inner = self.txn.take().unwrap();
                     for cmd in txn_inner {
                         // TODO: don't unwrap
-                        ret.push(self.run_command(&cmd, &tx).await?.unwrap());
+                        ret.push(self.run_command(&cmd).await?.unwrap());
                     }
                     self.txn = None;
                     Some(Value::from(ret))
@@ -308,7 +310,7 @@ impl ConnectionState {
                     Some(Value::simple_string("QUEUED"))
                 }
             } else {
-                self.run_command(&full_command, &tx).await?
+                self.run_command(&full_command).await?
             };
 
             if self.is_master() {
@@ -318,7 +320,8 @@ impl ConnectionState {
             }
 
             if let Some(ret) = ret {
-                tx.send(ret)
+                self.tx()
+                    .send(ret)
                     .with_context(|| format!("responding to {:?} command", full_command.first()))?;
             }
         }
@@ -336,13 +339,14 @@ impl ConnectionState {
         }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+        self.tx = Some(tx);
 
         if self.app_state.is_replica() {
-            *self.app_state.master_tx.write().await = Some(tx.clone());
+            *self.app_state.master_tx.write().await = Some(self.tx().clone());
         }
 
         let addr = self.addr;
-        let read_cmd_handle = tokio::spawn(async move { self.read_commands(read, tx).await });
+        let read_cmd_handle = tokio::spawn(async move { self.read_commands(read).await });
 
         while let Some(value) = rx.recv().await {
             eprintln!(

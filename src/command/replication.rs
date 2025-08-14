@@ -4,7 +4,6 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Context};
-use tokio::sync::mpsc;
 
 use crate::{resp::Value, ConnectionState, State};
 
@@ -36,7 +35,6 @@ pub async fn replconf(
     state: Arc<State>,
     _: &mut ConnectionState,
     args: &[String],
-    _tx: &mpsc::UnboundedSender<Value>,
 ) -> anyhow::Result<Value> {
     let [field, args @ ..] = args else {
         bail!("TODO: args.len() < 1");
@@ -60,9 +58,8 @@ pub async fn replconf(
 
 pub async fn psync(
     state: Arc<State>,
-    _: &mut ConnectionState,
+    conn_state: &mut ConnectionState,
     args: &[String],
-    tx: &mpsc::UnboundedSender<Value>,
 ) -> anyhow::Result<Value> {
     let [replication_id, replication_offset] = args else {
         bail!("TODO: args.len() != 2");
@@ -73,14 +70,16 @@ pub async fn psync(
         "Replication id is not '?', got {replication_id} OR Replication offset is not '-1', got {replication_offset}"
     );
 
-    state.replicas.write().await.push(tx.clone());
+    state.replicas.write().await.push(conn_state.tx().clone());
 
-    tx.send(Value::simple_string(format!(
-        "FULLRESYNC {} {}",
-        state.replication_id,
-        state.replication_offset.load(Ordering::SeqCst)
-    )))
-    .context("Sending FULLSYNC response")?;
+    conn_state
+        .tx()
+        .send(Value::simple_string(format!(
+            "FULLRESYNC {} {}",
+            state.replication_id,
+            state.replication_offset.load(Ordering::SeqCst)
+        )))
+        .context("Sending FULLSYNC response")?;
 
     Ok(Value::Rdb(include_bytes!("./empty.rdb").to_vec()))
 }
