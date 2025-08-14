@@ -7,7 +7,7 @@ use std::{
 use anyhow::{bail, Context};
 use serde::Deserialize;
 
-use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
+use crate::{resp::Value, ConnectionMode, ConnectionState, MapValue, MapValueContent, State};
 
 pub mod list;
 pub mod persistence;
@@ -203,40 +203,82 @@ impl Command {
     ) -> anyhow::Result<Value> {
         eprintln!("Command::execute on {self:?}");
         let state = Arc::clone(&conn_state.app_state);
-        let ret = match self {
-            Command::Ping => Value::simple_string("PONG"),
-            Command::Echo => Value::bulk_string(&args[0]),
-            Command::Set => set(state, conn_state, args).await?,
-            Command::Get => get(state, conn_state, args).await?,
+        let ret = match (self, conn_state.mode) {
+            // Intro
+            (Command::Ping, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
+                Value::simple_string("PONG")
+            }
+            (Command::Echo, ConnectionMode::Normal) => Value::bulk_string(&args[0]),
+            (Command::Set, ConnectionMode::Normal) => set(state, conn_state, args).await?,
+            (Command::Get, ConnectionMode::Normal) => get(state, conn_state, args).await?,
 
-            Command::RPush => list::rpush(state, conn_state, args).await?,
-            Command::LPush => list::lpush(state, conn_state, args).await?,
-            Command::LRange => list::lrange(state, conn_state, args).await?,
-            Command::LLen => list::llen(state, conn_state, args).await?,
-            Command::LPop => list::lpop(state, conn_state, args).await?,
-            Command::BLPop => list::blpop(state, conn_state, args).await?,
+            // Lists
+            (Command::RPush, ConnectionMode::Normal) => {
+                list::rpush(state, conn_state, args).await?
+            }
+            (Command::LPush, ConnectionMode::Normal) => {
+                list::lpush(state, conn_state, args).await?
+            }
+            (Command::LRange, ConnectionMode::Normal) => {
+                list::lrange(state, conn_state, args).await?
+            }
+            (Command::LLen, ConnectionMode::Normal) => list::llen(state, conn_state, args).await?,
+            (Command::LPop, ConnectionMode::Normal) => list::lpop(state, conn_state, args).await?,
+            (Command::BLPop, ConnectionMode::Normal) => {
+                list::blpop(state, conn_state, args).await?
+            }
 
-            Command::Type => stream::ty(state, conn_state, args).await?,
-            Command::XAdd => stream::xadd(state, conn_state, args).await?,
-            Command::XRange => stream::xrange(state, conn_state, args).await?,
-            Command::XRead => stream::xread(state, conn_state, args).await?,
+            // Streams
+            (Command::Type, ConnectionMode::Normal) => stream::ty(state, conn_state, args).await?,
+            (Command::XAdd, ConnectionMode::Normal) => {
+                stream::xadd(state, conn_state, args).await?
+            }
+            (Command::XRange, ConnectionMode::Normal) => {
+                stream::xrange(state, conn_state, args).await?
+            }
+            (Command::XRead, ConnectionMode::Normal) => {
+                stream::xread(state, conn_state, args).await?
+            }
 
-            Command::Incr => transaction::incr(state, conn_state, args).await?,
-            Command::Multi => {
+            // Transactions
+            (Command::Incr, ConnectionMode::Normal) => {
+                transaction::incr(state, conn_state, args).await?
+            }
+            (Command::Multi, ConnectionMode::Normal) => {
                 conn_state.txn = Some(Vec::new());
                 Value::simple_string("OK")
             }
-            Command::Exec => Value::simple_error("ERR EXEC without MULTI"),
-            Command::Discard => Value::simple_error("ERR DISCARD without MULTI"),
+            (Command::Exec, ConnectionMode::Normal) => {
+                Value::simple_error("ERR EXEC without MULTI")
+            }
+            (Command::Discard, ConnectionMode::Normal) => {
+                Value::simple_error("ERR DISCARD without MULTI")
+            }
 
-            Command::Info => replication::info(state, conn_state, args).await?,
-            Command::ReplConf => replication::replconf(state, conn_state, args, tx).await?,
-            Command::PSync => replication::psync(state, conn_state, args, tx).await?,
+            // Replication
+            (Command::Info, ConnectionMode::Normal) => {
+                replication::info(state, conn_state, args).await?
+            }
+            (Command::ReplConf, ConnectionMode::Normal) => {
+                replication::replconf(state, conn_state, args, tx).await?
+            }
+            (Command::PSync, ConnectionMode::Normal) => {
+                replication::psync(state, conn_state, args, tx).await?
+            }
 
-            Command::Config => persistence::config(state, conn_state, args).await?,
-            Command::Keys => persistence::keys(state, conn_state, args).await?,
+            // RDB Persistence
+            (Command::Config, ConnectionMode::Normal) => {
+                persistence::config(state, conn_state, args).await?
+            }
+            (Command::Keys, ConnectionMode::Normal) => {
+                persistence::keys(state, conn_state, args).await?
+            }
 
-            Command::Subscribe => pubsub::subscribe(state, conn_state, args).await?,
+            (Command::Subscribe, ConnectionMode::Normal | ConnectionMode::Subscribed) => {
+                pubsub::subscribe(state, conn_state, args).await?
+            }
+
+            (_, ConnectionMode::Subscribed) => Value::simple_error("ERR Can't execute 'echo': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context")
         };
 
         Ok(ret)

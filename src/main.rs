@@ -192,12 +192,20 @@ impl State {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ConnectionMode {
+    #[default]
+    Normal,
+    Subscribed,
+}
+
 #[derive(Debug)]
 pub struct ConnectionState {
     addr: Option<SocketAddr>,
     txn: Option<Vec<Vec<String>>>,
     channels: HashSet<String>,
     app_state: Arc<State>,
+    mode: ConnectionMode,
 }
 
 impl ConnectionState {
@@ -207,6 +215,7 @@ impl ConnectionState {
             txn: None,
             channels: Default::default(),
             app_state,
+            mode: Default::default(),
         }
     }
 
