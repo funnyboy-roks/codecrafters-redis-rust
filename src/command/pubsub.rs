@@ -38,12 +38,12 @@ pub async fn unsubscribe(
         bail!("TODO: args.len() != 1");
     };
 
-    conn_state.unsubscribe(channel);
+    let len = conn_state.unsubscribe(channel);
 
     Ok(Value::from_iter([
         Value::from("unsubscribe"),
         Value::from(channel),
-        Value::from(conn_state.channels.len()),
+        Value::from(len),
     ]))
 }
 
