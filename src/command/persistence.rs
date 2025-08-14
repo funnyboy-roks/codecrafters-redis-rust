@@ -1,8 +1,14 @@
+use std::sync::Arc;
+
 use anyhow::{bail, ensure};
 
 use crate::{resp::Value, ConnectionState, State};
 
-pub async fn config(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn config(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let [method, fields @ ..] = args else {
         bail!("TODO: args.len() < 1");
     };
@@ -35,7 +41,11 @@ pub async fn config(state: &State, _: &ConnectionState, args: &[String]) -> anyh
     Ok(ret)
 }
 
-pub async fn keys(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn keys(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let [filter] = args else {
         bail!("TODO: args.len() != 1");
     };

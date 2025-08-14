@@ -1,10 +1,14 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use anyhow::Context;
 
 use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
-pub async fn rpush(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn rpush(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -70,7 +74,11 @@ pub async fn rpush(state: &State, _: &ConnectionState, args: &[String]) -> anyho
     Ok(Value::from(len))
 }
 
-pub async fn lpush(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lpush(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let (key, mut values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -139,7 +147,11 @@ pub async fn lpush(state: &State, _: &ConnectionState, args: &[String]) -> anyho
     Ok(Value::from(len))
 }
 
-pub async fn lrange(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lrange(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let [key, start_index, end_index, ..] = args else {
         todo!("args.len() < 3");
     };
@@ -183,7 +195,11 @@ pub async fn lrange(state: &State, _: &ConnectionState, args: &[String]) -> anyh
     Ok(ret)
 }
 
-pub async fn llen(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn llen(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
     assert_eq!(values.len(), 0);
 
@@ -200,7 +216,11 @@ pub async fn llen(state: &State, _: &ConnectionState, args: &[String]) -> anyhow
     Ok(Value::from(len))
 }
 
-pub async fn lpop(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lpop(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let count: Option<usize> = values
@@ -231,7 +251,11 @@ pub async fn lpop(state: &State, _: &ConnectionState, args: &[String]) -> anyhow
     Ok(ret)
 }
 
-pub async fn blpop(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn blpop(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let timeout = values

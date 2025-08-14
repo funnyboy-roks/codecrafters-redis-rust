@@ -1,19 +1,22 @@
 use std::{
     str::FromStr,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::{bail, Context};
+use serde::Deserialize;
 
 use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
 pub mod list;
 pub mod persistence;
+pub mod pubsub;
 pub mod replication;
 pub mod stream;
 pub mod transaction;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Command {
     Ping,
     Echo,
@@ -43,6 +46,8 @@ pub enum Command {
 
     Config,
     Keys,
+
+    Subscribe,
 }
 
 impl FromStr for Command {
@@ -78,6 +83,8 @@ impl FromStr for Command {
 
             "config" => Self::Config,
             "keys" => Self::Keys,
+
+            "subscribe" => Self::Subscribe,
 
             _ => {
                 bail!("unknown command: {s:?}");
@@ -118,6 +125,8 @@ impl Command {
 
             Self::Config => "CONFIG",
             Self::Keys => "KEYS",
+
+            Self::Subscribe => "SUBSCRIBE",
         }
     }
 
@@ -138,7 +147,8 @@ impl Command {
             | Command::ReplConf
             | Command::PSync
             | Command::Config
-            | Command::Keys => false,
+            | Command::Keys
+            | Command::Subscribe => false,
 
             Command::Set
             | Command::RPush
@@ -174,7 +184,8 @@ impl Command {
             | Command::Info
             | Command::PSync
             | Command::Config
-            | Command::Keys => false,
+            | Command::Keys
+            | Command::Subscribe => false,
         }
     }
 
@@ -191,7 +202,7 @@ impl Command {
         tx: &tokio::sync::mpsc::UnboundedSender<Value>,
     ) -> anyhow::Result<Value> {
         eprintln!("Command::execute on {self:?}");
-        let state = &conn_state.app_state;
+        let state = Arc::clone(&conn_state.app_state);
         let ret = match self {
             Command::Ping => Value::simple_string("PONG"),
             Command::Echo => Value::bulk_string(&args[0]),
@@ -224,6 +235,8 @@ impl Command {
 
             Command::Config => persistence::config(state, conn_state, args).await?,
             Command::Keys => persistence::keys(state, conn_state, args).await?,
+
+            Command::Subscribe => pubsub::subscribe(state, conn_state, args).await?,
         };
 
         Ok(ret)
@@ -236,7 +249,11 @@ impl From<Command> for Value {
     }
 }
 
-pub async fn set(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn set(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let [key, value, ..] = args else {
         todo!("args.len() < 2");
     };
@@ -256,7 +273,11 @@ pub async fn set(state: &State, _: &ConnectionState, args: &[String]) -> anyhow:
     Ok(Value::bulk_string("OK"))
 }
 
-pub async fn get(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn get(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let key = &args[0];
     let value = if let Some(value) = state.map.get(key) {
         if value.expires_at.is_none_or(|e| SystemTime::now() < e) {

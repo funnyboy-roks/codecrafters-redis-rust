@@ -1,8 +1,14 @@
+use std::sync::Arc;
+
 use anyhow::bail;
 
 use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
-pub async fn incr(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
+pub async fn incr(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
     let [key, ..] = args else {
         bail!("TODO: args.len() < 1");
     };
