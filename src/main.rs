@@ -1,6 +1,7 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     fmt::Display,
+    net::SocketAddr,
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -184,75 +185,75 @@ impl State {
             .context("reading rdb response from PSYNC command")?;
 
         let state = Arc::clone(&self);
-        tokio::spawn(async move {
-            handle_connection(state, read, write, "to master".to_string(), true)
-                .await
-                .unwrap()
-        });
+        let conn = ConnectionState::new(None, state);
+        tokio::spawn(async move { conn.handle_connection(read, write).await.unwrap() });
 
         Ok(())
     }
 }
 
-async fn run_command(
-    state: &State,
-    txn: &mut Option<Vec<Vec<String>>>,
-    command: &[String],
-    tx: &mpsc::UnboundedSender<Value>,
-    is_master: bool,
-) -> anyhow::Result<Option<Value>> {
-    let (command, args) = command.split_first().expect("command length >= 1");
-
-    let command: Command = command.parse().context("parsing command")?;
-
-    if command.is_write() {
-        state
-            .replicas
-            .write()
-            .await
-            .retain(|replica| replica.send(command.into_command_value(args)).is_ok());
-    }
-
-    let ret = command.execute(state, txn, args, tx).await?;
-
-    if command.send_response() {
-        eprintln!("send_response is true");
-        return Ok(Some(ret));
-    }
-
-    if state.is_replica() && is_master {
-        eprintln!("skipping response on master");
-        return Ok(None);
-    }
-
-    Ok(Some(ret))
+#[derive(Debug)]
+pub struct ConnectionState {
+    addr: Option<SocketAddr>,
+    txn: Option<Vec<Vec<String>>>,
+    channels: HashSet<String>,
+    app_state: Arc<State>,
 }
 
-async fn handle_connection<R, W>(
-    state: Arc<State>,
-    read: R,
-    mut write: W,
-    addr: String,
-    is_master: bool,
-) -> anyhow::Result<()>
-where
-    R: AsyncBufRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin,
-{
-    println!("accepted new connection: {addr}");
+impl ConnectionState {
+    pub fn new(addr: Option<SocketAddr>, app_state: Arc<State>) -> Self {
+        Self {
+            addr,
+            txn: None,
+            channels: Default::default(),
+            app_state,
+        }
+    }
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    fn is_master(&self) -> bool {
+        self.addr.is_none()
+    }
+
+    async fn run_command(
+        &mut self,
+        command: &[String],
+        tx: &mpsc::UnboundedSender<Value>,
+    ) -> anyhow::Result<Option<Value>> {
+        let (command, args) = command.split_first().expect("command length >= 1");
+
+        let command: Command = command.parse().context("parsing command")?;
+
+        if command.is_write() {
+            self.app_state
+                .replicas
+                .write()
+                .await
+                .retain(|replica| replica.send(command.into_command_value(args)).is_ok());
+        }
+
+        let ret = command.execute(self, args, tx).await?;
+
+        if command.send_response() {
+            eprintln!("send_response is true");
+            return Ok(Some(ret));
+        }
+
+        if self.app_state.is_replica() && self.is_master() {
+            eprintln!("skipping response on master");
+            return Ok(None);
+        }
+
+        Ok(Some(ret))
+    }
 
     async fn read_commands<R>(
+        &mut self,
         mut r: R,
-        state: Arc<State>,
         tx: mpsc::UnboundedSender<Value>,
-        is_master: bool,
     ) -> anyhow::Result<()>
     where
         R: AsyncRead + AsyncBufRead + Unpin,
     {
-        let mut txn: Option<Vec<Vec<String>>> = None;
         loop {
             let filled = r.fill_buf().await.context("filling buf").unwrap();
 
@@ -279,34 +280,32 @@ where
             // TODO: handle error
             assert!(!full_command.is_empty());
 
-            let ret = if let Some(ref mut txn_inner) = txn {
+            let ret = if let Some(ref mut txn_inner) = self.txn {
                 let command = full_command.first().expect("command length >= 1");
                 if command.eq_ignore_ascii_case("exec") {
                     let mut ret = Vec::with_capacity(txn_inner.len());
+                    let txn_inner = self.txn.take().unwrap();
                     for cmd in txn_inner {
-                        let mut new_txn = None;
-                        ret.push(
-                            run_command(&state, &mut new_txn, cmd, &tx, is_master)
-                                .await?
-                                .unwrap(),
-                        ); // TODO: don't unwrap
-                        assert!(new_txn.is_none());
+                        // TODO: don't unwrap
+                        ret.push(self.run_command(&cmd, &tx).await?.unwrap());
                     }
-                    txn = None;
+                    self.txn = None;
                     Some(Value::from(ret))
                 } else if command.eq_ignore_ascii_case("discard") {
-                    txn = None;
+                    self.txn = None;
                     Some(Value::simple_string("OK"))
                 } else {
                     txn_inner.push(full_command.clone());
                     Some(Value::simple_string("QUEUED"))
                 }
             } else {
-                run_command(&state, &mut txn, &full_command, &tx, is_master).await?
+                self.run_command(&full_command, &tx).await?
             };
 
-            if is_master {
-                state.replication_offset.fetch_add(bytes, Ordering::SeqCst);
+            if self.is_master() {
+                self.app_state
+                    .replication_offset
+                    .fetch_add(bytes, Ordering::SeqCst);
             }
 
             if let Some(ret) = ret {
@@ -316,34 +315,53 @@ where
         }
     }
 
-    if state.is_replica() {
-        *state.master_tx.write().await = Some(tx.clone());
+    async fn handle_connection<R, W>(mut self, read: R, mut write: W) -> anyhow::Result<()>
+    where
+        R: AsyncBufRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin,
+    {
+        if let Some(addr) = &self.addr {
+            eprintln!("accepted new connection: {addr}");
+        } else {
+            eprintln!("accepted new connection with master");
+        }
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+
+        if self.app_state.is_replica() {
+            *self.app_state.master_tx.write().await = Some(tx.clone());
+        }
+
+        let addr = self.addr;
+        let read_cmd_handle = tokio::spawn(async move { self.read_commands(read, tx).await });
+
+        while let Some(value) = rx.recv().await {
+            eprintln!(
+                "[{}:{}:{}] sending value    = {:?}",
+                file!(),
+                line!(),
+                column!(),
+                &value
+            );
+            value
+                .write_to(&mut write)
+                .await
+                .with_context(|| format!("sending value: {value:?}"))?;
+        }
+
+        if !read_cmd_handle.is_finished() {
+            eprintln!("Waiting for 'read_cmd_handle' to be finished");
+        }
+        read_cmd_handle.await??;
+
+        if let Some(addr) = addr {
+            eprintln!("Connection terminated: {addr}");
+        } else {
+            eprintln!("Connection with master terminated");
+        }
+
+        Ok(())
     }
-
-    let read_cmd_handle = tokio::spawn(read_commands(read, Arc::clone(&state), tx, is_master));
-
-    while let Some(value) = rx.recv().await {
-        eprintln!(
-            "[{}:{}:{}] sending value    = {:?}",
-            file!(),
-            line!(),
-            column!(),
-            &value
-        );
-        value
-            .write_to(&mut write)
-            .await
-            .with_context(|| format!("sending value: {value:?}"))?;
-    }
-
-    if !read_cmd_handle.is_finished() {
-        eprintln!("Waiting for 'read_cmd_handle' to be finished");
-    }
-    read_cmd_handle.await??;
-
-    eprintln!("Connection terminated: {addr}");
-
-    Ok(())
 }
 
 #[tokio::main]
@@ -436,7 +454,8 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             let (read, write) = stream.into_split();
             let read = BufReader::new(read);
-            match handle_connection(state, read, write, format!("from {addr}"), false).await {
+            let connection = ConnectionState::new(Some(addr), state);
+            match connection.handle_connection(read, write).await {
                 Ok(()) => {}
                 Err(err) => eprintln!("Error handling connection: {err:?}"),
             }

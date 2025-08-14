@@ -11,9 +11,9 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{resp::Value, MapValue, MapValueContent, State, StreamEvent};
+use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State, StreamEvent};
 
-pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn ty(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, ..] = args else {
         todo!("args.len() < 1");
     };
@@ -31,7 +31,7 @@ pub async fn ty(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::simple_string(kind))
 }
 
-pub async fn xadd(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn xadd(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, id_string, kv_pairs @ ..] = args else {
         todo!("args.len() < 2");
     };
@@ -151,7 +151,7 @@ fn parse_bound(
     })
 }
 
-pub async fn xrange(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn xrange(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, start, end, ..] = args else {
         todo!("args.len() < 3");
     };
@@ -299,7 +299,7 @@ async fn xread_block(state: &State, args: &[String]) -> anyhow::Result<Value> {
     })
 }
 
-pub async fn xread(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn xread(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     match &*args[0] {
         "streams" => xread_streams(state, &args[1..]).await,
         "block" => xread_block(state, &args[1..]).await,

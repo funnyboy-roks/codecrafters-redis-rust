@@ -3,9 +3,9 @@ use std::{fmt::Write, sync::atomic::Ordering};
 use anyhow::{bail, ensure, Context};
 use tokio::sync::mpsc;
 
-use crate::{resp::Value, State};
+use crate::{resp::Value, ConnectionState, State};
 
-pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn info(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [section, ..] = args else {
         bail!("TODO: args.len() < 1");
     };
@@ -27,6 +27,7 @@ pub async fn info(state: &State, args: &[String]) -> anyhow::Result<Value> {
 
 pub async fn replconf(
     state: &State,
+    _: &ConnectionState,
     args: &[String],
     _tx: &mpsc::UnboundedSender<Value>,
 ) -> anyhow::Result<Value> {
@@ -52,6 +53,7 @@ pub async fn replconf(
 
 pub async fn psync(
     state: &State,
+    _: &ConnectionState,
     args: &[String],
     tx: &mpsc::UnboundedSender<Value>,
 ) -> anyhow::Result<Value> {

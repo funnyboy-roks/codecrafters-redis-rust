@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{bail, Context};
 
-use crate::{resp::Value, MapValue, MapValueContent, State};
+use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
 pub mod list;
 pub mod persistence;
@@ -186,44 +186,44 @@ impl Command {
 
     pub async fn execute(
         self,
-        state: &State,
-        txn: &mut Option<Vec<Vec<String>>>,
+        conn_state: &mut ConnectionState,
         args: &[String],
         tx: &tokio::sync::mpsc::UnboundedSender<Value>,
     ) -> anyhow::Result<Value> {
         eprintln!("Command::execute on {self:?}");
+        let state = &conn_state.app_state;
         let ret = match self {
             Command::Ping => Value::simple_string("PONG"),
             Command::Echo => Value::bulk_string(&args[0]),
-            Command::Set => set(state, args).await?,
-            Command::Get => get(state, args).await?,
+            Command::Set => set(state, conn_state, args).await?,
+            Command::Get => get(state, conn_state, args).await?,
 
-            Command::RPush => list::rpush(state, args).await?,
-            Command::LPush => list::lpush(state, args).await?,
-            Command::LRange => list::lrange(state, args).await?,
-            Command::LLen => list::llen(state, args).await?,
-            Command::LPop => list::lpop(state, args).await?,
-            Command::BLPop => list::blpop(state, args).await?,
+            Command::RPush => list::rpush(state, conn_state, args).await?,
+            Command::LPush => list::lpush(state, conn_state, args).await?,
+            Command::LRange => list::lrange(state, conn_state, args).await?,
+            Command::LLen => list::llen(state, conn_state, args).await?,
+            Command::LPop => list::lpop(state, conn_state, args).await?,
+            Command::BLPop => list::blpop(state, conn_state, args).await?,
 
-            Command::Type => stream::ty(state, args).await?,
-            Command::XAdd => stream::xadd(state, args).await?,
-            Command::XRange => stream::xrange(state, args).await?,
-            Command::XRead => stream::xread(state, args).await?,
+            Command::Type => stream::ty(state, conn_state, args).await?,
+            Command::XAdd => stream::xadd(state, conn_state, args).await?,
+            Command::XRange => stream::xrange(state, conn_state, args).await?,
+            Command::XRead => stream::xread(state, conn_state, args).await?,
 
-            Command::Incr => transaction::incr(state, args).await?,
+            Command::Incr => transaction::incr(state, conn_state, args).await?,
             Command::Multi => {
-                *txn = Some(Vec::new());
+                conn_state.txn = Some(Vec::new());
                 Value::simple_string("OK")
             }
             Command::Exec => Value::simple_error("ERR EXEC without MULTI"),
             Command::Discard => Value::simple_error("ERR DISCARD without MULTI"),
 
-            Command::Info => replication::info(state, args).await?,
-            Command::ReplConf => replication::replconf(state, args, tx).await?,
-            Command::PSync => replication::psync(state, args, tx).await?,
+            Command::Info => replication::info(state, conn_state, args).await?,
+            Command::ReplConf => replication::replconf(state, conn_state, args, tx).await?,
+            Command::PSync => replication::psync(state, conn_state, args, tx).await?,
 
-            Command::Config => persistence::config(state, args).await?,
-            Command::Keys => persistence::keys(state, args).await?,
+            Command::Config => persistence::config(state, conn_state, args).await?,
+            Command::Keys => persistence::keys(state, conn_state, args).await?,
         };
 
         Ok(ret)
@@ -236,7 +236,7 @@ impl From<Command> for Value {
     }
 }
 
-pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn set(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, value, ..] = args else {
         todo!("args.len() < 2");
     };
@@ -256,7 +256,7 @@ pub async fn set(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::bulk_string("OK"))
 }
 
-pub async fn get(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn get(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let key = &args[0];
     let value = if let Some(value) = state.map.get(key) {
         if value.expires_at.is_none_or(|e| SystemTime::now() < e) {

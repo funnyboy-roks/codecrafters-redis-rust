@@ -1,8 +1,8 @@
 use anyhow::{bail, ensure};
 
-use crate::{resp::Value, State};
+use crate::{resp::Value, ConnectionState, State};
 
-pub async fn config(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn config(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [method, fields @ ..] = args else {
         bail!("TODO: args.len() < 1");
     };
@@ -35,7 +35,7 @@ pub async fn config(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(ret)
 }
 
-pub async fn keys(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn keys(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [filter] = args else {
         bail!("TODO: args.len() != 1");
     };

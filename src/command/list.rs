@@ -2,9 +2,9 @@ use std::{collections::VecDeque, time::Duration};
 
 use anyhow::Context;
 
-use crate::{resp::Value, MapValue, MapValueContent, State};
+use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
-pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn rpush(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -70,7 +70,7 @@ pub async fn rpush(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::from(len))
 }
 
-pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lpush(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let (key, mut values) = args.split_first().expect("TODO: args.len() < 2");
 
     assert!(!values.is_empty());
@@ -139,7 +139,7 @@ pub async fn lpush(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::from(len))
 }
 
-pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lrange(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, start_index, end_index, ..] = args else {
         todo!("args.len() < 3");
     };
@@ -183,7 +183,7 @@ pub async fn lrange(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(ret)
 }
 
-pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn llen(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
     assert_eq!(values.len(), 0);
 
@@ -200,7 +200,7 @@ pub async fn llen(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(Value::from(len))
 }
 
-pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn lpop(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let count: Option<usize> = values
@@ -231,7 +231,7 @@ pub async fn lpop(state: &State, args: &[String]) -> anyhow::Result<Value> {
     Ok(ret)
 }
 
-pub async fn blpop(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn blpop(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let (key, values) = args.split_first().expect("TODO: args.len() < 2");
 
     let timeout = values

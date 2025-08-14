@@ -1,8 +1,8 @@
 use anyhow::bail;
 
-use crate::{resp::Value, MapValue, MapValueContent, State};
+use crate::{resp::Value, ConnectionState, MapValue, MapValueContent, State};
 
-pub async fn incr(state: &State, args: &[String]) -> anyhow::Result<Value> {
+pub async fn incr(state: &State, _: &ConnectionState, args: &[String]) -> anyhow::Result<Value> {
     let [key, ..] = args else {
         bail!("TODO: args.len() < 1");
     };
