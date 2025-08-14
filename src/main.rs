@@ -240,7 +240,7 @@ impl ConnectionState {
             if let Some(idx) = channels
                 .iter()
                 .enumerate()
-                .find_map(|(i, c)| (!c.same_channel(tx)).then_some(i))
+                .find_map(|(i, c)| (c.same_channel(tx)).then_some(i))
             {
                 channels.swap_remove(idx);
             }
