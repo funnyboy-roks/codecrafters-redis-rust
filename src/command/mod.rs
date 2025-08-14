@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -94,8 +95,14 @@ impl FromStr for Command {
     }
 }
 
+impl Display for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
 impl Command {
-    fn to_str(self) -> &'static str {
+    pub const fn to_str(self) -> &'static str {
         match self {
             Self::Ping => "PING",
             Self::Echo => "ECHO",
@@ -278,7 +285,7 @@ impl Command {
                 pubsub::subscribe(state, conn_state, args).await?
             }
 
-            (_, ConnectionMode::Subscribed) => Value::simple_error("ERR Can't execute 'echo': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context")
+            (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
         };
 
         Ok(ret)
