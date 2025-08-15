@@ -140,3 +140,32 @@ pub async fn zcard(
 
     Ok(Value::from(len))
 }
+
+pub async fn zscore(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [key, value] = args else {
+        todo!("args.len() != 2");
+    };
+
+    let map_value = state.map.get(key);
+    let set = if let Some(ref value) = map_value {
+        if let MapValueContent::SortedSet(ref set) = value.value {
+            set
+        } else {
+            todo!()
+        }
+    } else {
+        return Ok(Value::Null);
+    };
+
+    let ret = set
+        .iter()
+        .find(|e| e.value == *value)
+        .map(|v| Value::from(v.score.to_string()))
+        .unwrap_or_default();
+
+    Ok(ret)
+}

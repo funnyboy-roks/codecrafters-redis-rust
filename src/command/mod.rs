@@ -57,6 +57,8 @@ pub enum Command {
     ZAdd,
     ZRank,
     ZRange,
+    ZCard,
+    ZScore,
 }
 
 impl Display for Command {
@@ -92,7 +94,9 @@ impl Command {
             | Self::Unsubscribe
             | Self::Publish
             | Self::ZRank
-            | Self::ZRange => false,
+            | Self::ZRange
+            | Self::ZCard
+            | Self::ZScore => false,
 
             Self::Set
             | Self::RPush
@@ -135,7 +139,9 @@ impl Command {
             | Self::Publish
             | Self::ZAdd
             | Self::ZRank
-            | Self::ZRange => false,
+            | Self::ZRange
+            | Self::ZCard
+            | Self::ZScore => false,
         }
     }
 
@@ -244,6 +250,12 @@ impl Command {
             }
             (Command::ZRange, ConnectionMode::Normal) => {
                 sorted_set::zrange(state, conn_state, args).await?
+            }
+            (Command::ZCard, ConnectionMode::Normal) => {
+                sorted_set::zcard(state, conn_state, args).await?
+            }
+            (Command::ZScore, ConnectionMode::Normal) => {
+                sorted_set::zscore(state, conn_state, args).await?
             }
 
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
