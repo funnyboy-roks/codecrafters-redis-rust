@@ -27,7 +27,7 @@ pub async fn zadd(
 
     let mut removed = false;
     set.retain(|e| {
-        let ret = e.value != *value;
+        let ret = e.value == *value;
         removed |= ret;
         ret
     });
@@ -97,7 +97,7 @@ pub async fn zrange(
     let ret: Value = set
         .iter()
         .skip(min)
-        .take(max - min)
+        .take(max - min + 1)
         .map(|e| Value::from(&e.value))
         .collect();
 
