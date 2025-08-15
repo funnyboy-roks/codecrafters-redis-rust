@@ -169,3 +169,37 @@ pub async fn zscore(
 
     Ok(ret)
 }
+
+pub async fn zrem(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [key, value] = args else {
+        todo!("args.len() != 2");
+    };
+
+    let MapValueContent::SortedSet(ref mut set) = state
+        .map
+        .entry(key.clone())
+        .or_insert(crate::MapValue {
+            value: MapValueContent::SortedSet(Default::default()),
+            expires_at: None,
+        })
+        .value
+    else {
+        todo!()
+    };
+
+    let mut removed = 0;
+    set.retain(|e| {
+        if e.value == *value {
+            removed += 1;
+            false
+        } else {
+            true
+        }
+    });
+
+    Ok(Value::from(removed))
+}
