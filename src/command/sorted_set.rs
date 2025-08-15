@@ -27,9 +27,12 @@ pub async fn zadd(
 
     let mut removed = false;
     set.retain(|e| {
-        let ret = e.value == *value;
-        removed |= ret;
-        ret
+        if e.value == *value {
+            removed = true;
+            false
+        } else {
+            true
+        }
     });
 
     set.insert(SetEntry {
