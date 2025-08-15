@@ -307,7 +307,7 @@ impl ConnectionState {
     async fn run_command(&mut self, command: &[String]) -> anyhow::Result<Option<Value>> {
         let (command, args) = command.split_first().expect("command length >= 1");
 
-        let command: Command = command.parse().context("parsing command")?;
+        let command: Command = command.to_uppercase().parse().context("parsing command")?;
 
         if command.is_write() {
             self.app_state

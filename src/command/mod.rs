@@ -19,7 +19,7 @@ pub mod stream;
 pub mod transaction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, EnumString, IntoStaticStr)]
-#[strum(serialize_all = "lowercase")]
+#[strum(serialize_all = "UPPERCASE")]
 pub enum Command {
     Ping,
     Echo,
