@@ -1,12 +1,12 @@
 use std::{
     fmt::Display,
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use serde::Deserialize;
+use strum::{EnumString, IntoStaticStr};
 
 use crate::{resp::Value, ConnectionMode, ConnectionState, MapValue, MapValueContent, State};
 
@@ -18,7 +18,8 @@ pub mod sorted_set;
 pub mod stream;
 pub mod transaction;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, EnumString, IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum Command {
     Ping,
     Echo,
@@ -54,54 +55,7 @@ pub enum Command {
     Publish,
 
     ZAdd,
-}
-
-impl FromStr for Command {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let cmd = match &*s.to_lowercase() {
-            "ping" => Self::Ping,
-            "echo" => Self::Echo,
-            "set" => Self::Set,
-            "get" => Self::Get,
-
-            "rpush" => Self::RPush,
-            "lpush" => Self::LPush,
-            "lrange" => Self::LRange,
-            "llen" => Self::LLen,
-            "lpop" => Self::LPop,
-            "blpop" => Self::BLPop,
-
-            "type" => Self::Type,
-            "xadd" => Self::XAdd,
-            "xrange" => Self::XRange,
-            "xread" => Self::XRead,
-
-            "incr" => Self::Incr,
-            "multi" => Self::Multi,
-            "exec" => Self::Exec,
-            "discard" => Self::Discard,
-
-            "info" => Self::Info,
-            "replconf" => Self::ReplConf,
-            "psync" => Self::PSync,
-
-            "config" => Self::Config,
-            "keys" => Self::Keys,
-
-            "subscribe" => Self::Subscribe,
-            "unsubscribe" => Self::Unsubscribe,
-            "publish" => Self::Publish,
-
-            "zadd" => Self::ZAdd,
-
-            _ => {
-                bail!("unknown command: {s:?}");
-            }
-        };
-        Ok(cmd)
-    }
+    ZRank,
 }
 
 impl Display for Command {
@@ -111,43 +65,8 @@ impl Display for Command {
 }
 
 impl Command {
-    pub const fn to_str(self) -> &'static str {
-        match self {
-            Self::Ping => "PING",
-            Self::Echo => "ECHO",
-            Self::Set => "SET",
-            Self::Get => "GET",
-
-            Self::RPush => "RPUSH",
-            Self::LPush => "LPUSH",
-            Self::LRange => "LRANGE",
-            Self::LLen => "LLEN",
-            Self::LPop => "LPOP",
-            Self::BLPop => "BLPOP",
-
-            Self::Type => "TYPE",
-            Self::XAdd => "XADD",
-            Self::XRange => "XRANGE",
-            Self::XRead => "XREAD",
-
-            Self::Incr => "INCR",
-            Self::Multi => "MULTI",
-            Self::Exec => "EXEC",
-            Self::Discard => "DISCARD",
-
-            Self::Info => "INFO",
-            Self::ReplConf => "REPLCONF",
-            Self::PSync => "PSYNC",
-
-            Self::Config => "CONFIG",
-            Self::Keys => "KEYS",
-
-            Self::Subscribe => "SUBSCRIBE",
-            Self::Unsubscribe => "UNSUBSCRIBE",
-            Self::Publish => "PUBLISH",
-
-            Self::ZAdd => "ZADD",
-        }
+    pub fn to_str(self) -> &'static str {
+        <&str>::from(self)
     }
 
     pub const fn is_write(self) -> bool {
@@ -170,7 +89,8 @@ impl Command {
             | Self::Keys
             | Self::Subscribe
             | Self::Unsubscribe
-            | Self::Publish => false,
+            | Self::Publish
+            | Self::ZRank => false,
 
             Self::Set
             | Self::RPush
@@ -211,7 +131,8 @@ impl Command {
             | Self::Subscribe
             | Self::Unsubscribe
             | Self::Publish
-            | Self::ZAdd => false,
+            | Self::ZAdd
+            | Self::ZRank => false,
         }
     }
 
@@ -314,6 +235,9 @@ impl Command {
 
             (Command::ZAdd, ConnectionMode::Normal) => {
                 sorted_set::zadd(state, conn_state, args).await?
+            }
+            (Command::ZRank, ConnectionMode::Normal) => {
+                sorted_set::zrank(state, conn_state, args).await?
             }
 
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))

@@ -25,7 +25,6 @@ pub async fn zadd(
         todo!()
     };
 
-    dbg!(&set);
     let count = set
         .replace(SetEntry {
             score: score
@@ -35,7 +34,36 @@ pub async fn zadd(
         })
         .map(|_| 0)
         .unwrap_or(1);
-    dbg!(&set);
 
     Ok(Value::from(count))
+}
+
+pub async fn zrank(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [key, value] = args else {
+        todo!("args.len() != 2");
+    };
+
+    let MapValueContent::SortedSet(ref mut set) = state
+        .map
+        .entry(key.clone())
+        .or_insert(crate::MapValue {
+            value: MapValueContent::SortedSet(Default::default()),
+            expires_at: None,
+        })
+        .value
+    else {
+        todo!()
+    };
+
+    let ret = if let Some((i, _value)) = set.iter().enumerate().find(|(_, v)| v.value == *value) {
+        Value::from(i)
+    } else {
+        Value::Null
+    };
+
+    Ok(ret)
 }
