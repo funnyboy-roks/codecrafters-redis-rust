@@ -47,16 +47,15 @@ pub async fn zrank(
         todo!("args.len() != 2");
     };
 
-    let MapValueContent::SortedSet(ref mut set) = state
-        .map
-        .entry(key.clone())
-        .or_insert(crate::MapValue {
-            value: MapValueContent::SortedSet(Default::default()),
-            expires_at: None,
-        })
-        .value
-    else {
-        todo!()
+    let map_value = state.map.get(key);
+    let set = if let Some(ref value) = map_value {
+        if let MapValueContent::SortedSet(ref set) = value.value {
+            set
+        } else {
+            todo!()
+        }
+    } else {
+        return Ok(Value::Null);
     };
 
     let ret = if let Some((i, _value)) = set.iter().enumerate().find(|(_, v)| v.value == *value) {
@@ -66,4 +65,36 @@ pub async fn zrank(
     };
 
     Ok(ret)
+}
+
+pub async fn zrange(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [key, min, max] = args else {
+        todo!("args.len() != 2");
+    };
+
+    let min: usize = min.parse().context("parsing min")?;
+    let max: usize = max.parse().context("parsing max")?;
+
+    let map_value = state.map.get(key);
+    let set = if let Some(ref value) = map_value {
+        if let MapValueContent::SortedSet(ref set) = value.value {
+            set
+        } else {
+            todo!()
+        }
+    } else {
+        return Ok(Value::Null);
+    };
+
+    // let ret = if let Some((i, _value)) = set.iter().enumerate().find(|(_, v)| v.value == *value) {
+    //     Value::from(i)
+    // } else {
+    //     Value::Null
+    // };
+
+    Ok(Value::Null)
 }
