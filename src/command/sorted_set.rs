@@ -94,7 +94,7 @@ pub async fn zrange(
             todo!()
         }
     } else {
-        return Ok(Value::Null);
+        return Ok(Value::empty_array());
     };
 
     let min = if min < 0 {

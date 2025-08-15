@@ -279,6 +279,10 @@ impl Value {
 
         Ok(())
     }
+
+    pub fn empty_array() -> Value {
+        Value::Array(Vec::new())
+    }
 }
 
 impl Hash for Value {
