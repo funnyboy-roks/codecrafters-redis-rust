@@ -80,7 +80,7 @@ pub async fn zrange(
     args: &[String],
 ) -> anyhow::Result<Value> {
     let [key, min, max] = args else {
-        todo!("args.len() != 2");
+        todo!("args.len() != 3");
     };
 
     let min: isize = min.parse().context("parsing min")?;
@@ -116,4 +116,27 @@ pub async fn zrange(
         .collect();
 
     Ok(ret)
+}
+
+pub async fn zcard(
+    state: Arc<State>,
+    _: &mut ConnectionState,
+    args: &[String],
+) -> anyhow::Result<Value> {
+    let [key] = args else {
+        todo!("args.len() != 1");
+    };
+
+    let map_value = state.map.get(key);
+    let len = if let Some(ref value) = map_value {
+        if let MapValueContent::SortedSet(ref set) = value.value {
+            set.len()
+        } else {
+            todo!()
+        }
+    } else {
+        0
+    };
+
+    Ok(Value::from(len))
 }
