@@ -83,8 +83,8 @@ pub async fn zrange(
         todo!("args.len() != 2");
     };
 
-    let min: usize = min.parse().context("parsing min")?;
-    let max: usize = max.parse().context("parsing max")?;
+    let min: isize = min.parse().context("parsing min")?;
+    let max: isize = max.parse().context("parsing max")?;
 
     let map_value = state.map.get(key);
     let set = if let Some(ref value) = map_value {
@@ -95,6 +95,17 @@ pub async fn zrange(
         }
     } else {
         return Ok(Value::Null);
+    };
+
+    let min = if min < 0 {
+        set.len().saturating_add_signed(min)
+    } else {
+        min as usize
+    };
+    let max = if max < 0 {
+        set.len().saturating_add_signed(max)
+    } else {
+        max as usize
     };
 
     let ret: Value = set
