@@ -25,17 +25,21 @@ pub async fn zadd(
         todo!()
     };
 
-    let count = set
-        .replace(SetEntry {
-            score: score
-                .parse()
-                .with_context(|| format!("parsing score '{score}'"))?,
-            value: value.clone(),
-        })
-        .map(|_| 0)
-        .unwrap_or(1);
+    let mut removed = false;
+    set.retain(|e| {
+        let ret = e.value != *value;
+        removed |= ret;
+        ret
+    });
 
-    Ok(Value::from(count))
+    set.insert(SetEntry {
+        score: score
+            .parse()
+            .with_context(|| format!("parsing score '{score}'"))?,
+        value: value.clone(),
+    });
+
+    Ok(Value::from(if removed { 0 } else { 1 }))
 }
 
 pub async fn zrank(
@@ -90,11 +94,12 @@ pub async fn zrange(
         return Ok(Value::Null);
     };
 
-    // let ret = if let Some((i, _value)) = set.iter().enumerate().find(|(_, v)| v.value == *value) {
-    //     Value::from(i)
-    // } else {
-    //     Value::Null
-    // };
+    let ret: Value = set
+        .iter()
+        .skip(min)
+        .take(max - min)
+        .map(|e| Value::from(&e.value))
+        .collect();
 
-    Ok(Value::Null)
+    Ok(ret)
 }
