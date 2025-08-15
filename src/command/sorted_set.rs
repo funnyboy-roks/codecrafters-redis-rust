@@ -25,12 +25,17 @@ pub async fn zadd(
         todo!()
     };
 
-    set.insert(SetEntry {
-        score: score
-            .parse()
-            .with_context(|| format!("parsing score '{score}'"))?,
-        value: value.clone(),
-    });
+    dbg!(&set);
+    let count = set
+        .replace(SetEntry {
+            score: score
+                .parse()
+                .with_context(|| format!("parsing score '{score}'"))?,
+            value: value.clone(),
+        })
+        .map(|_| 0)
+        .unwrap_or(1);
+    dbg!(&set);
 
-    Ok(Value::from(1))
+    Ok(Value::from(count))
 }

@@ -26,18 +26,38 @@ pub mod command;
 pub mod rdb;
 pub mod resp;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone)]
 struct SetEntry {
     score: f64,
     value: String,
 }
 
+impl PartialEq for SetEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.value.eq(&other.value)
+    }
+}
+
 impl Eq for SetEntry {}
+
+impl PartialOrd for SetEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Ord for SetEntry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or(std::cmp::Ordering::Greater)
+        use std::cmp::Ordering;
+        if self.value == other.value {
+            return Ordering::Equal;
+        }
+        match self.score.partial_cmp(&other.score) {
+            Some(Ordering::Equal) => self.value.cmp(&other.value),
+            ord => ord
+                .with_context(|| format!("can't compare floats {} and {}", self.score, other.score))
+                .unwrap(),
+        }
     }
 }
 
