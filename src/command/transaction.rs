@@ -19,7 +19,10 @@ pub async fn incr(
                 *val += 1;
                 Value::from(*val)
             }
-            MapValueContent::String(_) | MapValueContent::List(_) | MapValueContent::Stream(_) => {
+            MapValueContent::String(_)
+            | MapValueContent::List(_)
+            | MapValueContent::Stream(_)
+            | MapValueContent::SortedSet(_) => {
                 Value::simple_error("ERR value is not an integer or out of range")
             }
         }

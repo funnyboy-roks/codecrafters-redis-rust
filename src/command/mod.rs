@@ -14,6 +14,7 @@ pub mod list;
 pub mod persistence;
 pub mod pubsub;
 pub mod replication;
+pub mod sorted_set;
 pub mod stream;
 pub mod transaction;
 
@@ -51,6 +52,8 @@ pub enum Command {
     Subscribe,
     Unsubscribe,
     Publish,
+
+    ZAdd,
 }
 
 impl FromStr for Command {
@@ -90,6 +93,8 @@ impl FromStr for Command {
             "subscribe" => Self::Subscribe,
             "unsubscribe" => Self::Unsubscribe,
             "publish" => Self::Publish,
+
+            "zadd" => Self::ZAdd,
 
             _ => {
                 bail!("unknown command: {s:?}");
@@ -140,6 +145,8 @@ impl Command {
             Self::Subscribe => "SUBSCRIBE",
             Self::Unsubscribe => "UNSUBSCRIBE",
             Self::Publish => "PUBLISH",
+
+            Self::ZAdd => "ZADD",
         }
     }
 
@@ -171,7 +178,8 @@ impl Command {
             | Self::LPop
             | Self::BLPop
             | Self::XAdd
-            | Self::Incr => true,
+            | Self::Incr
+            | Self::ZAdd => true,
         }
     }
 
@@ -202,7 +210,8 @@ impl Command {
             | Self::Keys
             | Self::Subscribe
             | Self::Unsubscribe
-            | Self::Publish => false,
+            | Self::Publish
+            | Self::ZAdd => false,
         }
     }
 
@@ -303,6 +312,10 @@ impl Command {
                 pubsub::publish(state, conn_state, args).await?
             }
 
+            (Command::ZAdd, ConnectionMode::Normal) => {
+                sorted_set::zadd(state, conn_state, args).await?
+            }
+
             (cmd, ConnectionMode::Subscribed) => Value::simple_error(format!("ERR Can't execute '{cmd}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"))
         };
 
@@ -358,6 +371,7 @@ pub async fn get(
                 MapValueContent::String(string) => Value::bulk_string(string.clone()),
                 MapValueContent::List(_) => Value::Null,
                 MapValueContent::Stream(_) => Value::Null,
+                MapValueContent::SortedSet(_) => Value::Null,
             }
         } else {
             drop(value);

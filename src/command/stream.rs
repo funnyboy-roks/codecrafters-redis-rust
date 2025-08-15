@@ -27,6 +27,7 @@ pub async fn ty(
             MapValueContent::String(_) | MapValueContent::Integer(_) => "string",
             MapValueContent::List(_) => "list",
             MapValueContent::Stream(_) => "stream",
+            MapValueContent::SortedSet(_) => "sorted_set",
         }
     } else {
         "none"
@@ -84,6 +85,7 @@ pub async fn xadd(
                     0
                 }
             }
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else if millis == 0 {
         1
@@ -111,6 +113,7 @@ pub async fn xadd(
                 }
                 s.insert(id, kv_pairs.into());
             }
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         state.map.insert(
@@ -179,6 +182,7 @@ pub async fn xrange(
                 .range((start, end))
                 .map(|(k, v)| Value::from_iter([id_to_value(*k), v.iter().collect()]))
                 .collect(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         Value::Null
@@ -214,6 +218,7 @@ async fn xread_streams(state: Arc<State>, streams: &[String]) -> anyhow::Result<
                             .collect(),
                     ]));
                 }
+                MapValueContent::SortedSet(_) => todo!(),
             }
         }
     }

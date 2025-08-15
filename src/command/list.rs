@@ -39,6 +39,7 @@ pub async fn rpush(
                 len
             }
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         let mut values = values;
@@ -132,6 +133,7 @@ pub async fn lpush(
                 len
             }
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         state.map.insert(
@@ -187,6 +189,7 @@ pub async fn lrange(
                 }
             }
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         Value::Array(Vec::new())
@@ -208,6 +211,7 @@ pub async fn llen(
             MapValueContent::String(_) | MapValueContent::Integer(_) => todo!(),
             MapValueContent::List(ref items) => items.len(),
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         0
@@ -243,6 +247,7 @@ pub async fn lpop(
                 }
             }
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         Value::Null
@@ -302,6 +307,7 @@ pub async fn blpop(
                 }
             }
             MapValueContent::Stream(_) => todo!(),
+            MapValueContent::SortedSet(_) => todo!(),
         }
     } else {
         wait().await?

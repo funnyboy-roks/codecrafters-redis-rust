@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fmt::Display,
     net::SocketAddr,
     path::PathBuf,
@@ -26,12 +26,28 @@ pub mod command;
 pub mod rdb;
 pub mod resp;
 
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+struct SetEntry {
+    score: f64,
+    value: String,
+}
+
+impl Eq for SetEntry {}
+
+impl Ord for SetEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or(std::cmp::Ordering::Greater)
+    }
+}
+
 #[derive(Debug, Clone)]
 enum MapValueContent {
     Integer(i64),
     String(String),
     List(VecDeque<String>),
     Stream(BTreeMap<(u64, u64), Vec<String>>),
+    SortedSet(BTreeSet<SetEntry>),
 }
 
 impl From<&str> for MapValueContent {
